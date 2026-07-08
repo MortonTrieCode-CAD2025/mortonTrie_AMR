@@ -6,17 +6,23 @@
 #pragma once
 
 #include "General.h"
-#define C_DEBUG 1     // when set as 1, (a) add additional output to check grid points added and removed
-#define C_CHECK_MORTON_BOUNDARY 0  // when set as 1, will check if the node exceeds boudnaries of the background block when generate mesh. Must be set as 1 when solid boudnary
-                            // near the computatinal domain, such as channel flow
-#define C_SPEED_UP 0 // when set as 1, the project will speed up by negleting some processess. This may result in some problems. These processes need further improvement
-// 1) The process to add all nodes in cells on the innermost boundary. Since all nodes in cells on the boundary close to the innermost boundary will be added,
-//    generally neglect this process is OK if the boundary is smooth. In Grid_Manager::search_nodes_near_solid(...). It will influence nodes inside the solid boundary. Seems time saving is insignificant.
-// the refine_nodes for C_SPEED_UP=0 > refine_nodes for C_SPEED_UP=1
-// e.g. for HM case [C_SPEED_UP=0] refine_nodes.size() 429297
-//                  [C_SPEED_UP=1] refine_nodes.size() 402368
+#define C_DEBUG 0
+#define C_CHECK_MORTON_BOUNDARY 0
+#define C_SPEED_UP 0
 
-#define C_MAP_TYPE 1 // when set as 1, use unordered_map; when set as 2, use map; when set as 3, use MortonTrie
+#define C_MAP_TYPE 1 // 1=unordered_map, 2=map, 3=MortonTrie
+
+// Derive the backend macros consumed by Grid_Manager.h::D_map_define and
+// user.h::_s_DDF from the single C_MAP_TYPE switch above, so the two cannot
+// drift out of sync. settings.hpp keeps the same names commented out for the
+// rare case where one wants to force a backend independently.
+#if (C_MAP_TYPE == 1) && !defined(USE_HASHMAP) && !defined(USE_RBTREE) && !defined(USE_MORTONTRIE)
+  #define USE_HASHMAP
+#elif (C_MAP_TYPE == 2) && !defined(USE_HASHMAP) && !defined(USE_RBTREE) && !defined(USE_MORTONTRIE)
+  #define USE_RBTREE
+#elif (C_MAP_TYPE == 3) && !defined(USE_HASHMAP) && !defined(USE_RBTREE) && !defined(USE_MORTONTRIE)
+  #define USE_MORTONTRIE
+#endif
  
 #define C_SEARCH_METHOD 1 // method to identify if nodes need to be removed, when set as 3, use icount_refine in a region;
                                                                           // when set as 2, use two way search and use icout_refine on sreaching boundary
@@ -27,8 +33,6 @@
 #define C_FSI_INTERFACE 0               /// if C_SOLID_BOUNDARY == 1, using IBM, an addtional map will be used to store number of points near the node;
 #define C_SOLID_BOUNDARY 1              ///< Choose method to implement solid boundary condition, 1 static boundary, 2 moving boundary;
                                         //  if C_SOLID_BOUNDARY == 2: update nodes at each finest time step
-
-// SOLIDCENTER preprocessor directive removed - unified arbitrary solid positioning enabled
 
 namespace airplane
 {
@@ -48,6 +52,13 @@ namespace airplane
     // Domain boundaries: {x_min, y_min, z_min, x_max, y_max, z_max}
     constexpr D_real C_domain[6] = {0, 0, 0,
                                C_xb, C_yb, C_zb};
+
+    // Solid model origin (absolute coordinate). STL local (0,0,0) is placed
+    // here. Edit these three values to manually control where the solid sits
+    // inside the domain (e.g., sphere center for sphere-flow test).
+    constexpr D_real C_solid_origin[3] = {(C_domain[0] + C_domain[3]) / 2,
+                                          (C_domain[1] + C_domain[4]) / 2,
+                                          (C_domain[2] + C_domain[5]) / 2};
 
     // Mesh settings
     const D_real C_dx = 256;    ///< Grid space of the background mesh
@@ -93,12 +104,18 @@ namespace hm
     const std::string F_model_path = "/home/AMR-framework/stl/ln_j20.stl";
 
     #define C_DIMS 3                      ///< Number of dimensions
-    #define C_Q 27                        ///< Number of discrete velocities
+    #define C_Q 19                        ///< Number of discrete velocities (global: last #define wins; all set to 19 for D3Q19 sphere validation)
 
     // Region settings - Unified domain boundary definition
     // Domain boundaries: {x_min, y_min, z_min, x_max, y_max, z_max}
     constexpr D_real C_domain[6] = {-10, -50, -60,
                                400, 150, 60};
+
+    // Solid model origin (absolute coordinate). STL local (0,0,0) is placed
+    // here. Edit to manually control where the solid sits inside the domain.
+    constexpr D_real C_solid_origin[3] = {(C_domain[0] + C_domain[3]) / 2,
+                                          (C_domain[1] + C_domain[4]) / 2,
+                                          (C_domain[2] + C_domain[5]) / 2};
 
     // Mesh settings
     constexpr D_real C_dx = 20;      ///< Grid space of the background mesh
@@ -146,44 +163,69 @@ namespace hm
 
 namespace sphere
 {
-    const std::string F_model_path = "/home/lb-amr/stl/sphere.stl";
+    const std::string F_model_path = "stl/sphere.stl";
+    const std::string OUTPUT_NAME = "sphere";
 
     #define C_DIMS 3                      ///< Number of dimensions
-    #define C_Q 27                        ///< Number of discrete velocities
+    #define C_Q 19                        ///< D3Q19
 
-    // M.Geier et al. / Journal of Computational Physics 348 (2017) 889–898
-    // domain = 11d cubic box
-    // sphere = diameter d, loc in (2d, 0, 0)
-    // for stl, aabb = (9.5, 10.5), (9.5, 10.5), (9.5, 10.5)
+    // Sphere flow benchmark: Re = U*d/nu = 100, target Cd ≈ 1.09
+    // sphere.stl center at STL (10,10,10), placed at domain (4,4,4)
 
-    // Region settings - Unified domain boundary definition
+    // Region settings
+    constexpr D_real C_xb = 12;  ///< Background boundary distance in x direction (domain length, streamwise)
+    constexpr D_real C_yb = 8;   ///< Background boundary distance in y direction
+    constexpr D_real C_zb = 8;   ///< Background boundary distance in z direction
+
+    // Legacy domain boundary variables for compatibility (absolute upper bound, since C_domain starts at 0)
+    constexpr D_real xb_domain = C_xb;
+    constexpr D_real yb_domain = C_yb;
+    constexpr D_real zb_domain = C_zb;
+
     // Domain boundaries: {x_min, y_min, z_min, x_max, y_max, z_max}
-    constexpr D_real C_domain[6] = {8, 8, 8,
-                               19, 12, 12};
+    constexpr D_real C_domain[6] = {0, 0, 0,
+                               C_xb, C_yb, C_zb};
+
+    // Solid model origin: STL (10,10,10) → domain (4,4,4)
+    constexpr D_real C_solid_origin[3] = {-6, -6, -6};
 
     // Mesh settings
-    constexpr D_real C_dx = 0.2;      ///< Grid space of the background mesh
-    // constexpr int C_x0b_offset = 0;    ///< offset to avoid Morton_assit::find_x0 exceeding the boundary limit, the offset distance is (x0b_offset * C_dx)
-    // constexpr int C_y0b_offset = 0;
-    // constexpr int C_z0b_offset = 0;
-    constexpr uint C_max_level = 2;    ///< Maximum refinement level, the background mesh is level 0, others are 1, 2, 3, ..., C_maxlevel
+    constexpr D_real C_dx = 0.1;      ///< background grid spacing
+    constexpr int C_x0b_offset = 0;    ///< offset to avoid Morton_assit::find_x0 exceeding the boundary limit, the offset distance is (x0b_offset * C_dx)
+    constexpr int C_y0b_offset = 0;
+    constexpr int C_z0b_offset = 0;
+    constexpr uint C_max_level = 2;
+    constexpr bool C_IB_use_FH = true;
     constexpr uint C_overlap = 1;         ///< Number of overlapping grids (corresponding to coarser grid at ilevel - 1)
     constexpr uint C_extend_inner = 2;       ///< Number of nodes extended from solid points in the finest block
+    constexpr uint C_extend_inner_x0 = 2;      ///< additional extension in -x direction (inner block)
+    constexpr uint C_extend_inner_x1 = 2;      ///< additional extension in +x direction (inner block)
+    constexpr uint C_extend_inner_y0 = 2;      ///< additional extension in -y direction (inner block)
+    constexpr uint C_extend_inner_y1 = 2;      ///< additional extension in +y direction (inner block)
+    constexpr uint C_extend_inner_z0 = 2;      ///< additional extension in -z direction (inner block)
+    constexpr uint C_extend_inner_z1 = 2;      ///< additional extension in +z direction (inner block)
     constexpr uint C_extend = 4;             ///< Number of nodes extended from the inner block to outer blocks (iblock < C_max_level)
+    constexpr uint C_extend_outer_x0 = 2;      ///< additional extension in -x direction (outer block)
+    constexpr uint C_extend_outer_x1 = 2;      ///< additional extension in +x direction (outer block)
+    constexpr uint C_extend_outer_y0 = 2;      ///< additional extension in -y direction (outer block)
+    constexpr uint C_extend_outer_y1 = 2;      ///< additional extension in +y direction (outer block)
+    constexpr uint C_extend_outer_z0 = 2;      ///< additional extension in -z direction (outer block)
+    constexpr uint C_extend_outer_z1 = 2;      ///< additional extension in +z direction (outer block)
+    constexpr uint C_extend_ghost = 0;      ///< Number of nodes extended from solid points inside the solid
 
     // Simulation setting
-    constexpr uint U_iters = 100;
-    constexpr uint U_outputIters = 100;
+    constexpr uint U_iters = 1200;
+    constexpr uint U_outputIters = 1000;
 
     // Numerical parameters
-    static D_real U_dt = 0.001f;   ///< [s]
+    static D_real U_dt = 0.0058f;
 
     // Initial physical variables
     constexpr D_real U_u0 = 1.0;   ///< initial velocity in x direction
-    constexpr D_real U_v0 = 0.;    ///< initial velocity in x direction
-    constexpr D_real U_w0 = 0.;    ///< initial velocity in x direction
+    constexpr D_real U_v0 = 0.;    ///< initial velocity in y direction
+    constexpr D_real U_w0 = 0.;    ///< initial velocity in z direction
     constexpr D_real U_rho0 = 1.;  ///< initial density
-    constexpr D_real U_kineViscosity = 0.002;	   ///< kinetic viscosoity
+    constexpr D_real U_kineViscosity = 0.01;	   ///< Re = 100
     constexpr D_real U_dynaViscosity = U_kineViscosity * U_rho0;
 
     // Reference physical variables
@@ -199,7 +241,7 @@ namespace dji
 
 
     #define C_DIMS 3                      ///< Number of dimensions
-    #define C_Q 27                        ///< Number of discrete velocities
+    #define C_Q 19                        ///< Number of discrete velocities (global: last #define wins; all set to 19 for D3Q19 sphere validation)
 
 
 
@@ -207,6 +249,12 @@ namespace dji
     // Domain boundaries: {x_min, y_min, z_min, x_max, y_max, z_max}
     constexpr D_real C_domain[6] = {-100, -100, -100,
                                300, 300, 300};
+
+    // Solid model origin (absolute coordinate). STL local (0,0,0) is placed
+    // here. Edit to manually control where the solid sits inside the domain.
+    constexpr D_real C_solid_origin[3] = {(C_domain[0] + C_domain[3]) / 2,
+                                          (C_domain[1] + C_domain[4]) / 2,
+                                          (C_domain[2] + C_domain[5]) / 2};
 
     // Mesh settings
     constexpr D_real C_dx = 0.25;      ///< Grid space of the background mesh
@@ -269,7 +317,7 @@ namespace paris
 
 
     #define C_DIMS 3                      ///< Number of dimensions
-    #define C_Q 27                        ///< Number of discrete velocities
+    #define C_Q 19                        ///< Number of discrete velocities (global: last #define wins; all set to 19 for D3Q19 sphere validation)
 
 
 
@@ -277,6 +325,12 @@ namespace paris
     // Domain boundaries: {x_min, y_min, z_min, x_max, y_max, z_max}
     constexpr D_real C_domain[6] = {-200, -200, -100,
                                600, 600, 900};
+
+    // Solid model origin (absolute coordinate). STL local (0,0,0) is placed
+    // here. Edit to manually control where the solid sits inside the domain.
+    constexpr D_real C_solid_origin[3] = {(C_domain[0] + C_domain[3]) / 2,
+                                          (C_domain[1] + C_domain[4]) / 2,
+                                          (C_domain[2] + C_domain[5]) / 2};
 
     // Mesh settings
     constexpr D_real C_dx = 128;      ///< Grid space of the background mesh
@@ -339,7 +393,7 @@ namespace bunny
 
 
     #define C_DIMS 3                      ///< Number of dimensions
-    #define C_Q 27                        ///< Number of discrete velocities
+    #define C_Q 19                        ///< Number of discrete velocities (global: last #define wins; all set to 19 for D3Q19 sphere validation)
 
 
 
@@ -347,6 +401,12 @@ namespace bunny
     // Domain boundaries: {x_min, y_min, z_min, x_max, y_max, z_max}
     constexpr D_real C_domain[6] = {-400, -400, -400,
                                1200, 1200, 1200};
+
+    // Solid model origin (absolute coordinate). STL local (0,0,0) is placed
+    // here. Edit to manually control where the solid sits inside the domain.
+    constexpr D_real C_solid_origin[3] = {(C_domain[0] + C_domain[3]) / 2,
+                                          (C_domain[1] + C_domain[4]) / 2,
+                                          (C_domain[2] + C_domain[5]) / 2};
 
     // Mesh settings
     constexpr D_real C_dx = 5.5;      ///< Grid space of the background mesh
@@ -404,7 +464,7 @@ namespace bunny
 }
 
 
-using namespace airplane;
+using namespace sphere;
 
 #if (C_FSI_INTERFACE == 1)
 const unsigned int C_extend_IB = 1;      ///< Number of nodes extended from solid points for IBM

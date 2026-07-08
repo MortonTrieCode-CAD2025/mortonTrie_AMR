@@ -3,8 +3,6 @@
  * @brief Periodic Boundary Condition Method, copy Lattice_BC to Ghost_BC
  * @date 2023-09-22
  */
-#define BC_NO_GHOST
-#ifndef BC_NO_GHOST
 #include "BC/Periodic.hpp"
 
 periodic_West::periodic_West()
@@ -446,5 +444,3 @@ void periodic_Bot::applyBCStrategy()
         }
     }
 }
-
-#endif

@@ -41,30 +41,14 @@ void nonEquilibrumExtrapolation_West::applyBCStrategy()
         D_Phy_DDF feq[C_Q], nbr_feq[C_Q];
         calculateFeq_HeLuo(density_ptr->at(lat_code), {0.,0.,0.}, feq);
         calculateFeq_HeLuo(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
-        f_ptr[0].at(lat_code) = feq[0] + f_ptr[0].at(lat_code) - nbr_feq[0];
-        f_ptr[1].at(lat_code) = feq[1] + f_ptr[1].at(lat_code) - nbr_feq[1];
-        f_ptr[2].at(lat_code) = feq[2] + f_ptr[2].at(lat_code) - nbr_feq[2];
-        f_ptr[3].at(lat_code) = feq[3] + f_ptr[3].at(lat_code) - nbr_feq[3];
-        f_ptr[4].at(lat_code) = feq[4] + f_ptr[4].at(lat_code) - nbr_feq[4];
-        f_ptr[5].at(lat_code) = feq[5] + f_ptr[5].at(lat_code) - nbr_feq[5];
-        f_ptr[6].at(lat_code) = feq[6] + f_ptr[6].at(lat_code) - nbr_feq[6];
-        f_ptr[7].at(lat_code) = feq[7] + f_ptr[7].at(lat_code) - nbr_feq[7];
-        f_ptr[8].at(lat_code) = feq[8] + f_ptr[8].at(lat_code) - nbr_feq[8];
-        f_ptr[9].at(lat_code) = feq[9] + f_ptr[9].at(lat_code) - nbr_feq[9];
-        f_ptr[10].at(lat_code) = feq[10] + f_ptr[10].at(lat_code) - nbr_feq[10];
-        f_ptr[11].at(lat_code) = feq[11] + f_ptr[11].at(lat_code) - nbr_feq[11];
-        f_ptr[12].at(lat_code) = feq[12] + f_ptr[12].at(lat_code) - nbr_feq[12];
-        f_ptr[13].at(lat_code) = feq[13] + f_ptr[13].at(lat_code) - nbr_feq[13];
-        f_ptr[14].at(lat_code) = feq[14] + f_ptr[14].at(lat_code) - nbr_feq[14];
-        f_ptr[15].at(lat_code) = feq[15] + f_ptr[15].at(lat_code) - nbr_feq[15];
-        f_ptr[16].at(lat_code) = feq[16] + f_ptr[16].at(lat_code) - nbr_feq[16];
-        f_ptr[17].at(lat_code) = feq[17] + f_ptr[17].at(lat_code) - nbr_feq[17];
-        f_ptr[18].at(lat_code) = feq[18] + f_ptr[18].at(lat_code) - nbr_feq[18];
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            f_ptr[i_q].at(lat_code) = feq[i_q] + f_ptr[i_q].at(lat_code) - nbr_feq[i_q];
+        }
     }
  #endif
 #else
  #ifdef eflow_stable_bc
-    for (auto bc_idx : nonEquilibrumExtrapolation_West::lat_bc_idx) 
+    for (auto bc_idx : nonEquilibrumExtrapolation_West::lat_bc_idx)
     {
         D_setLat* bc_ptr = &(Lat_Manager::pointer_me->lat_bc.at(bc_idx));
         auto dirs = D3Q19_BC_Strategy::bdry_dirs.at(bc_idx);
@@ -110,25 +94,9 @@ void nonEquilibrumExtrapolation_East::applyBCStrategy()
         D_Phy_DDF feq[C_Q], nbr_feq[C_Q];
         calculateFeq_HeLuo(density_ptr->at(lat_code), velocity_ptr->at(nbr_code), feq);
         calculateFeq_HeLuo(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
-        f_ptr[0].at(lat_code) = feq[0] + f_ptr[0].at(lat_code) - nbr_feq[0];
-        f_ptr[1].at(lat_code) = feq[1] + f_ptr[1].at(lat_code) - nbr_feq[1];
-        f_ptr[2].at(lat_code) = feq[2] + f_ptr[2].at(lat_code) - nbr_feq[2];
-        f_ptr[3].at(lat_code) = feq[3] + f_ptr[3].at(lat_code) - nbr_feq[3];
-        f_ptr[4].at(lat_code) = feq[4] + f_ptr[4].at(lat_code) - nbr_feq[4];
-        f_ptr[5].at(lat_code) = feq[5] + f_ptr[5].at(lat_code) - nbr_feq[5];
-        f_ptr[6].at(lat_code) = feq[6] + f_ptr[6].at(lat_code) - nbr_feq[6];
-        f_ptr[7].at(lat_code) = feq[7] + f_ptr[7].at(lat_code) - nbr_feq[7];
-        f_ptr[8].at(lat_code) = feq[8] + f_ptr[8].at(lat_code) - nbr_feq[8];
-        f_ptr[9].at(lat_code) = feq[9] + f_ptr[9].at(lat_code) - nbr_feq[9];
-        f_ptr[10].at(lat_code) = feq[10] + f_ptr[10].at(lat_code) - nbr_feq[10];
-        f_ptr[11].at(lat_code) = feq[11] + f_ptr[11].at(lat_code) - nbr_feq[11];
-        f_ptr[12].at(lat_code) = feq[12] + f_ptr[12].at(lat_code) - nbr_feq[12];
-        f_ptr[13].at(lat_code) = feq[13] + f_ptr[13].at(lat_code) - nbr_feq[13];
-        f_ptr[14].at(lat_code) = feq[14] + f_ptr[14].at(lat_code) - nbr_feq[14];
-        f_ptr[15].at(lat_code) = feq[15] + f_ptr[15].at(lat_code) - nbr_feq[15];
-        f_ptr[16].at(lat_code) = feq[16] + f_ptr[16].at(lat_code) - nbr_feq[16];
-        f_ptr[17].at(lat_code) = feq[17] + f_ptr[17].at(lat_code) - nbr_feq[17];
-        f_ptr[18].at(lat_code) = feq[18] + f_ptr[18].at(lat_code) - nbr_feq[18];
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            f_ptr[i_q].at(lat_code) = feq[i_q] + f_ptr[i_q].at(lat_code) - nbr_feq[i_q];
+        }
     }
  #endif
 #else
@@ -175,48 +143,11 @@ void nonEquilibrumExtrapolation_South::applyBCStrategy()
         D_morton lat_code = i_bc_lat.first;
         D_morton nbr_code = Morton_Assist::find_y1(lat_code, 0);
         D_Phy_DDF feq[C_Q], nbr_feq[C_Q];
-        // computeLatticeBGKFeq(density_ptr->at(lat_code), velocity_ptr->at(lat_code), feq);
-        // computeLatticeBGKFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
         calculateFeq_HeLuo(density_ptr->at(lat_code), {0.,0.,0.}, feq);
-        // HeLuoFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
-        // f_ptr[0].at(lat_code) = feq[0] + f_ptr[0].at(lat_code) - nbr_feq[0];
-        // f_ptr[1].at(lat_code) = feq[1] + f_ptr[1].at(lat_code) - nbr_feq[1];
-        // f_ptr[2].at(lat_code) = feq[2] + f_ptr[2].at(lat_code) - nbr_feq[2];
-        // f_ptr[3].at(lat_code) = feq[3] + f_ptr[3].at(lat_code) - nbr_feq[3];
-        // f_ptr[4].at(lat_code) = feq[4] + f_ptr[4].at(lat_code) - nbr_feq[4];
-        // f_ptr[5].at(lat_code) = feq[5] + f_ptr[5].at(lat_code) - nbr_feq[5];
-        // f_ptr[6].at(lat_code) = feq[6] + f_ptr[6].at(lat_code) - nbr_feq[6];
-        // f_ptr[7].at(lat_code) = feq[7] + f_ptr[7].at(lat_code) - nbr_feq[7];
-        // f_ptr[8].at(lat_code) = feq[8] + f_ptr[8].at(lat_code) - nbr_feq[8];
-        // f_ptr[9].at(lat_code) = feq[9] + f_ptr[9].at(lat_code) - nbr_feq[9];
-        // f_ptr[10].at(lat_code) = feq[10] + f_ptr[10].at(lat_code) - nbr_feq[10];
-        // f_ptr[11].at(lat_code) = feq[11] + f_ptr[11].at(lat_code) - nbr_feq[11];
-        // f_ptr[12].at(lat_code) = feq[12] + f_ptr[12].at(lat_code) - nbr_feq[12];
-        // f_ptr[13].at(lat_code) = feq[13] + f_ptr[13].at(lat_code) - nbr_feq[13];
-        // f_ptr[14].at(lat_code) = feq[14] + f_ptr[14].at(lat_code) - nbr_feq[14];
-        // f_ptr[15].at(lat_code) = feq[15] + f_ptr[15].at(lat_code) - nbr_feq[15];
-        // f_ptr[16].at(lat_code) = feq[16] + f_ptr[16].at(lat_code) - nbr_feq[16];
-        // f_ptr[17].at(lat_code) = feq[17] + f_ptr[17].at(lat_code) - nbr_feq[17];
-        // f_ptr[18].at(lat_code) = feq[18] + f_ptr[18].at(lat_code) - nbr_feq[18];
-        f_ptr[0].at(lat_code) = feq[0];
-        f_ptr[1].at(lat_code) = feq[1];
-        f_ptr[2].at(lat_code) = feq[2];
-        f_ptr[3].at(lat_code) = feq[3];
-        f_ptr[4].at(lat_code) = feq[4];
-        f_ptr[5].at(lat_code) = feq[5];
-        f_ptr[6].at(lat_code) = feq[6];
-        f_ptr[7].at(lat_code) = feq[7];
-        f_ptr[8].at(lat_code) = feq[8];
-        f_ptr[9].at(lat_code) = feq[9];
-        f_ptr[10].at(lat_code) = feq[10];
-        f_ptr[11].at(lat_code) = feq[11];
-        f_ptr[12].at(lat_code) = feq[12];
-        f_ptr[13].at(lat_code) = feq[13];
-        f_ptr[14].at(lat_code) = feq[14];
-        f_ptr[15].at(lat_code) = feq[15];
-        f_ptr[16].at(lat_code) = feq[16];
-        f_ptr[17].at(lat_code) = feq[17];
-        f_ptr[18].at(lat_code) = feq[18];
+        calculateFeq_HeLuo(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            f_ptr[i_q].at(lat_code) = feq[i_q] + f_ptr[i_q].at(lat_code) - nbr_feq[i_q];
+        }
     }
  #endif
 #else
@@ -263,49 +194,11 @@ void nonEquilibrumExtrapolation_North::applyBCStrategy()
         D_morton lat_code = i_bc_lat.first;
         D_morton nbr_code = Morton_Assist::find_y0(lat_code, 0);
         D_Phy_DDF feq[C_Q], nbr_feq[C_Q];
-        // computeLatticeBGKFeq(density_ptr->at(lat_code), velocity_ptr->at(lat_code), feq);
-        // computeLatticeBGKFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
         calculateFeq_HeLuo(density_ptr->at(lat_code), {0.,0.,0.}, feq);
-        // HeLuoFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
-        // f_ptr[0].at(lat_code) = feq[0] + f_ptr[0].at(lat_code) - nbr_feq[0];
-        // f_ptr[1].at(lat_code) = feq[1] + f_ptr[1].at(lat_code) - nbr_feq[1];
-        // f_ptr[2].at(lat_code) = feq[2] + f_ptr[2].at(lat_code) - nbr_feq[2];
-        // f_ptr[3].at(lat_code) = feq[3] + f_ptr[3].at(lat_code) - nbr_feq[3];
-        // f_ptr[4].at(lat_code) = feq[4] + f_ptr[4].at(lat_code) - nbr_feq[4];
-        // f_ptr[5].at(lat_code) = feq[5] + f_ptr[5].at(lat_code) - nbr_feq[5];
-        // f_ptr[6].at(lat_code) = feq[6] + f_ptr[6].at(lat_code) - nbr_feq[6];
-        // f_ptr[7].at(lat_code) = feq[7] + f_ptr[7].at(lat_code) - nbr_feq[7];
-        // f_ptr[8].at(lat_code) = feq[8] + f_ptr[8].at(lat_code) - nbr_feq[8];
-        // f_ptr[9].at(lat_code) = feq[9] + f_ptr[9].at(lat_code) - nbr_feq[9];
-        // f_ptr[10].at(lat_code) = feq[10] + f_ptr[10].at(lat_code) - nbr_feq[10];
-        // f_ptr[11].at(lat_code) = feq[11] + f_ptr[11].at(lat_code) - nbr_feq[11];
-        // f_ptr[12].at(lat_code) = feq[12] + f_ptr[12].at(lat_code) - nbr_feq[12];
-        // f_ptr[13].at(lat_code) = feq[13] + f_ptr[13].at(lat_code) - nbr_feq[13];
-        // f_ptr[14].at(lat_code) = feq[14] + f_ptr[14].at(lat_code) - nbr_feq[14];
-        // f_ptr[15].at(lat_code) = feq[15] + f_ptr[15].at(lat_code) - nbr_feq[15];
-        // f_ptr[16].at(lat_code) = feq[16] + f_ptr[16].at(lat_code) - nbr_feq[16];
-        // f_ptr[17].at(lat_code) = feq[17] + f_ptr[17].at(lat_code) - nbr_feq[17];
-        // f_ptr[18].at(lat_code) = feq[18] + f_ptr[18].at(lat_code) - nbr_feq[18];
-
-        f_ptr[0].at(lat_code) = feq[0];
-        f_ptr[1].at(lat_code) = feq[1];
-        f_ptr[2].at(lat_code) = feq[2];
-        f_ptr[3].at(lat_code) = feq[3];
-        f_ptr[4].at(lat_code) = feq[4];
-        f_ptr[5].at(lat_code) = feq[5];
-        f_ptr[6].at(lat_code) = feq[6];
-        f_ptr[7].at(lat_code) = feq[7];
-        f_ptr[8].at(lat_code) = feq[8];
-        f_ptr[9].at(lat_code) = feq[9];
-        f_ptr[10].at(lat_code) = feq[10];
-        f_ptr[11].at(lat_code) = feq[11];
-        f_ptr[12].at(lat_code) = feq[12];
-        f_ptr[13].at(lat_code) = feq[13];
-        f_ptr[14].at(lat_code) = feq[14];
-        f_ptr[15].at(lat_code) = feq[15];
-        f_ptr[16].at(lat_code) = feq[16];
-        f_ptr[17].at(lat_code) = feq[17];
-        f_ptr[18].at(lat_code) = feq[18];
+        calculateFeq_HeLuo(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            f_ptr[i_q].at(lat_code) = feq[i_q] + f_ptr[i_q].at(lat_code) - nbr_feq[i_q];
+        }
     }
  #endif
 #else
@@ -352,49 +245,11 @@ void nonEquilibrumExtrapolation_Bot::applyBCStrategy()
         D_morton lat_code = i_bc_lat.first;
         D_morton nbr_code = Morton_Assist::find_z1(lat_code, 0);
         D_Phy_DDF feq[C_Q], nbr_feq[C_Q];
-        // computeLatticeBGKFeq(density_ptr->at(lat_code), velocity_ptr->at(lat_code), feq);
-        // computeLatticeBGKFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
         calculateFeq_HeLuo(density_ptr->at(lat_code), {0.,0.,0.}, feq);
-        // HeLuoFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
-        // f_ptr[0].at(lat_code) = feq[0] + f_ptr[0].at(lat_code) - nbr_feq[0];
-        // f_ptr[1].at(lat_code) = feq[1] + f_ptr[1].at(lat_code) - nbr_feq[1];
-        // f_ptr[2].at(lat_code) = feq[2] + f_ptr[2].at(lat_code) - nbr_feq[2];
-        // f_ptr[3].at(lat_code) = feq[3] + f_ptr[3].at(lat_code) - nbr_feq[3];
-        // f_ptr[4].at(lat_code) = feq[4] + f_ptr[4].at(lat_code) - nbr_feq[4];
-        // f_ptr[5].at(lat_code) = feq[5] + f_ptr[5].at(lat_code) - nbr_feq[5];
-        // f_ptr[6].at(lat_code) = feq[6] + f_ptr[6].at(lat_code) - nbr_feq[6];
-        // f_ptr[7].at(lat_code) = feq[7] + f_ptr[7].at(lat_code) - nbr_feq[7];
-        // f_ptr[8].at(lat_code) = feq[8] + f_ptr[8].at(lat_code) - nbr_feq[8];
-        // f_ptr[9].at(lat_code) = feq[9] + f_ptr[9].at(lat_code) - nbr_feq[9];
-        // f_ptr[10].at(lat_code) = feq[10] + f_ptr[10].at(lat_code) - nbr_feq[10];
-        // f_ptr[11].at(lat_code) = feq[11] + f_ptr[11].at(lat_code) - nbr_feq[11];
-        // f_ptr[12].at(lat_code) = feq[12] + f_ptr[12].at(lat_code) - nbr_feq[12];
-        // f_ptr[13].at(lat_code) = feq[13] + f_ptr[13].at(lat_code) - nbr_feq[13];
-        // f_ptr[14].at(lat_code) = feq[14] + f_ptr[14].at(lat_code) - nbr_feq[14];
-        // f_ptr[15].at(lat_code) = feq[15] + f_ptr[15].at(lat_code) - nbr_feq[15];
-        // f_ptr[16].at(lat_code) = feq[16] + f_ptr[16].at(lat_code) - nbr_feq[16];
-        // f_ptr[17].at(lat_code) = feq[17] + f_ptr[17].at(lat_code) - nbr_feq[17];
-        // f_ptr[18].at(lat_code) = feq[18] + f_ptr[18].at(lat_code) - nbr_feq[18];
-
-        f_ptr[0].at(lat_code) = feq[0];
-        f_ptr[1].at(lat_code) = feq[1];
-        f_ptr[2].at(lat_code) = feq[2];
-        f_ptr[3].at(lat_code) = feq[3];
-        f_ptr[4].at(lat_code) = feq[4];
-        f_ptr[5].at(lat_code) = feq[5];
-        f_ptr[6].at(lat_code) = feq[6];
-        f_ptr[7].at(lat_code) = feq[7];
-        f_ptr[8].at(lat_code) = feq[8];
-        f_ptr[9].at(lat_code) = feq[9];
-        f_ptr[10].at(lat_code) = feq[10];
-        f_ptr[11].at(lat_code) = feq[11];
-        f_ptr[12].at(lat_code) = feq[12];
-        f_ptr[13].at(lat_code) = feq[13];
-        f_ptr[14].at(lat_code) = feq[14];
-        f_ptr[15].at(lat_code) = feq[15];
-        f_ptr[16].at(lat_code) = feq[16];
-        f_ptr[17].at(lat_code) = feq[17];
-        f_ptr[18].at(lat_code) = feq[18];
+        calculateFeq_HeLuo(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            f_ptr[i_q].at(lat_code) = feq[i_q] + f_ptr[i_q].at(lat_code) - nbr_feq[i_q];
+        }
     }
  #endif
 #else
@@ -441,49 +296,11 @@ void nonEquilibrumExtrapolation_Top::applyBCStrategy()
         D_morton lat_code = i_bc_lat.first;
         D_morton nbr_code = Morton_Assist::find_z0(lat_code, 0);
         D_Phy_DDF feq[C_Q], nbr_feq[C_Q];
-        // computeLatticeBGKFeq(density_ptr->at(lat_code), velocity_ptr->at(lat_code), feq);
-        // computeLatticeBGKFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
         calculateFeq_HeLuo(density_ptr->at(lat_code), {0.,0.,0.}, feq);
-        // HeLuoFeq(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
-        // f_ptr[0].at(lat_code) = feq[0] + f_ptr[0].at(lat_code) - nbr_feq[0];
-        // f_ptr[1].at(lat_code) = feq[1] + f_ptr[1].at(lat_code) - nbr_feq[1];
-        // f_ptr[2].at(lat_code) = feq[2] + f_ptr[2].at(lat_code) - nbr_feq[2];
-        // f_ptr[3].at(lat_code) = feq[3] + f_ptr[3].at(lat_code) - nbr_feq[3];
-        // f_ptr[4].at(lat_code) = feq[4] + f_ptr[4].at(lat_code) - nbr_feq[4];
-        // f_ptr[5].at(lat_code) = feq[5] + f_ptr[5].at(lat_code) - nbr_feq[5];
-        // f_ptr[6].at(lat_code) = feq[6] + f_ptr[6].at(lat_code) - nbr_feq[6];
-        // f_ptr[7].at(lat_code) = feq[7] + f_ptr[7].at(lat_code) - nbr_feq[7];
-        // f_ptr[8].at(lat_code) = feq[8] + f_ptr[8].at(lat_code) - nbr_feq[8];
-        // f_ptr[9].at(lat_code) = feq[9] + f_ptr[9].at(lat_code) - nbr_feq[9];
-        // f_ptr[10].at(lat_code) = feq[10] + f_ptr[10].at(lat_code) - nbr_feq[10];
-        // f_ptr[11].at(lat_code) = feq[11] + f_ptr[11].at(lat_code) - nbr_feq[11];
-        // f_ptr[12].at(lat_code) = feq[12] + f_ptr[12].at(lat_code) - nbr_feq[12];
-        // f_ptr[13].at(lat_code) = feq[13] + f_ptr[13].at(lat_code) - nbr_feq[13];
-        // f_ptr[14].at(lat_code) = feq[14] + f_ptr[14].at(lat_code) - nbr_feq[14];
-        // f_ptr[15].at(lat_code) = feq[15] + f_ptr[15].at(lat_code) - nbr_feq[15];
-        // f_ptr[16].at(lat_code) = feq[16] + f_ptr[16].at(lat_code) - nbr_feq[16];
-        // f_ptr[17].at(lat_code) = feq[17] + f_ptr[17].at(lat_code) - nbr_feq[17];
-        // f_ptr[18].at(lat_code) = feq[18] + f_ptr[18].at(lat_code) - nbr_feq[18];
-
-        f_ptr[0].at(lat_code) = feq[0];
-        f_ptr[1].at(lat_code) = feq[1];
-        f_ptr[2].at(lat_code) = feq[2];
-        f_ptr[3].at(lat_code) = feq[3];
-        f_ptr[4].at(lat_code) = feq[4];
-        f_ptr[5].at(lat_code) = feq[5];
-        f_ptr[6].at(lat_code) = feq[6];
-        f_ptr[7].at(lat_code) = feq[7];
-        f_ptr[8].at(lat_code) = feq[8];
-        f_ptr[9].at(lat_code) = feq[9];
-        f_ptr[10].at(lat_code) = feq[10];
-        f_ptr[11].at(lat_code) = feq[11];
-        f_ptr[12].at(lat_code) = feq[12];
-        f_ptr[13].at(lat_code) = feq[13];
-        f_ptr[14].at(lat_code) = feq[14];
-        f_ptr[15].at(lat_code) = feq[15];
-        f_ptr[16].at(lat_code) = feq[16];
-        f_ptr[17].at(lat_code) = feq[17];
-        f_ptr[18].at(lat_code) = feq[18];
+        calculateFeq_HeLuo(density_ptr->at(nbr_code), velocity_ptr->at(nbr_code), nbr_feq);
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            f_ptr[i_q].at(lat_code) = feq[i_q] + f_ptr[i_q].at(lat_code) - nbr_feq[i_q];
+        }
     }
  #endif
 #else

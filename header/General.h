@@ -20,6 +20,10 @@
 
 #define DEPRECATED [[deprecated("This function is deprecated. Use a newer version or alternative.")]]
 
+// All runtime-generated files (log, Morton dump, Tecplot mesh, flow-field snapshots)
+// are written under this directory, keeping the source tree clean.
+constexpr const char* C_OUTPUT_DIR = "output";
+
 typedef double D_real;
 typedef int D_int;
 typedef unsigned long long D_uint;
@@ -41,15 +45,29 @@ using D_morton = std::bitset<C_BIT>;         // Bitset to store morton code, due
 // #define BOUNDARY 5
 
 // detect system to choose approriate libraries for mikdir
-#ifdef _WIN32   
-#include <io.h> 
-#include <direct.h>  
+#ifdef _WIN32
+#include <io.h>
+#include <direct.h>
 #include <Windows.h>
-#elif __linux__ 
-#include <unistd.h>  
-#include <sys/types.h>  
-#include <sys/stat.h> 
+#elif __linux__
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #endif
+
+inline void ensureOutputDir()
+{
+#ifdef _WIN32
+    _mkdir(C_OUTPUT_DIR);
+#else
+    mkdir(C_OUTPUT_DIR, 0777);
+#endif
+}
+
+inline std::string outputPath(const std::string& filename)
+{
+    return std::string(C_OUTPUT_DIR) + "/" + filename;
+}
 
 // timer
 // #ifdef __unix__

@@ -14,9 +14,10 @@ LBM_Manager* LBM_Manager::pointer_me;
 int main()
 {
 	Timer tmr;
+	ensureOutputDir();
 	// Create application log file
 	std::ofstream logfile;
-	logfile.open("log", ios::out);
+	logfile.open(outputPath("log"), ios::out);
 	Log_function::logfile = &logfile;
 	if (!logfile.is_open()) {
 		std::cout << "Can't open logfile" << std::endl;
@@ -29,7 +30,7 @@ int main()
 
 	obj_manager.initial();
 
-	// obj_manager.output();
+	obj_manager.output();
 
 	double t1 = tmr.elapsed();
 	std::cout << "Time for initial mesh: " << t1 - t0 << std::endl;

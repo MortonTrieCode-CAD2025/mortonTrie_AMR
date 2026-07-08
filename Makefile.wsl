@@ -1,0 +1,72 @@
+BIN = farseer
+
+INCLUDE_DIR = ./header
+OBJ_DIR = ./obj
+BIN_DIR = ../bin/
+ROOT_DIR = $(shell pwd)
+SUBDIRS_RAW = $(shell ls -l | grep ^d | awk '{if($$9 != "header" && $$9 != "obj") print $$9}') # Get the subdirectory list
+SUBDIRS = $(foreach dir,$(SUBDIRS_RAW),$(dir)) # Use the foreach function to split the string into multiple subdirectories
+
+# On 175 platform
+# HDF5PATH        = /opt/hdf5-1.12.0/
+HDF5PATH        = /usr/lib/x86_64-linux-gnu/hdf5/serial
+CXX       = g++
+CXXFLAGS  = -I${INCLUDE_DIR} -I/usr/include/x86_64-linux-gnu/mpich -I/usr/include/hdf5/serial -L${HDF5PATH} -lhdf5 -Wl,-rpath=${HDF5PATH}
+CXXFLAGS += -Werror=deprecated-declarations -std=c++17
+# CXXFLAGS += -g
+CXXFLAGS += -O3
+
+MAIN_SRC = \
+	main.cpp \
+	ComplexBoundary_Manager.cpp \
+	compressedMortonTrie.cpp \
+	Grid_Manager.cpp \
+	Grid_Manager_dynamic.cpp \
+	HDF5.cpp \
+	IO_Manager.cpp \
+	Lat_Manager.cpp \
+	Lat_Voxelize.cpp \
+	LBM_Manager.cpp \
+	LBM_Partition.cpp \
+	LBM_Simulator.cpp \
+	Morton_Assist.cpp \
+	mortonTrie.cpp \
+	mortonTrieMap.cpp \
+	Obj_Manager.cpp \
+	Shape.cpp \
+	Solid_Manager.cpp \
+	tecplot.cpp
+
+MAIN_OBJ = $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(MAIN_SRC))
+
+# Subdirectory sources (BC/, lbm_kernel/) are auto-included; ablation_*.cpp and
+# AblationBenchmark.cpp at the root level are NOT built by this Makefile —
+# they belong to Makefile.ablation.
+#
+# BC/Periodic.cpp, BC/Outflow.cpp, BC/ZouHe_Velocity.cpp are ghost-layer BC
+# implementations and are excluded: the project is built with BC_NO_GHOST
+# (see header/Lat_Manager.hpp), under which their class definitions in the
+# corresponding .hpp are #ifndef-BC_NO_GHOST-gated out, so compiling these
+# .cpp files would fail with "does not name a type". BC/ZouHe_NoSlip.cpp and
+# BC/ZouHe_Pressure.cpp are entirely commented out and compile to empty .o.
+SUBDIRS_SRC = $(filter-out \
+	BC/Periodic.cpp \
+	BC/Outflow.cpp \
+	BC/ZouHe_Velocity.cpp, \
+	$(foreach dir,$(SUBDIRS),$(wildcard $(dir)/*.cpp)))
+SUBDIRS_OBJ = $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SUBDIRS_SRC))
+
+SRC = $(MAIN_SRC) $(SUBDIRS_SRC)
+OBJ = $(MAIN_OBJ) $(SUBDIRS_OBJ)
+
+ALL: $(BIN)
+$(BIN): $(OBJ)
+	$(CXX) $^ -o $@ $(CXXFLAGS)
+
+$(OBJ_DIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+.PHONY:clean
+clean:
+	@if [ -d obj ]; then rm -r $(OBJ_DIR)/*; fi

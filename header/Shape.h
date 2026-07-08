@@ -180,6 +180,12 @@ public:
 	static bool intersect_line_with_triangle(D_vec startPoint, D_vec p2, Solid_Face triFace, D_real& dis_to_startPoint);
 	static bool triBoxOverlap(double boxcenter[3],double boxhalfsize[3],double triverts[3][3]);
 	static D_real two_points_length(D_vec, D_vec);
+	// Shortest distance from a point to a triangle in 3D (Ericson,
+	// Real-Time Collision Detection, ClosestPtPointTriangle). Used by
+	// update_cutting_lattices to decide if a triangle cuts a cell — the
+	// SAT-based triBoxOverlap returns false negatives for small triangles
+	// (sphere.stl edge ~0.035 < dx=0.05), which starves the IB band.
+	static D_real point_triangle_distance(D_vec p, Solid_Face triFace);
 
 	void print_pointCloud();
 
@@ -191,7 +197,6 @@ private:
 	void channel(D_real a, D_real b, D_real c, D_real d, D_real radius, std::vector<Solid_Node> &node, D_real t);
 	void geofile(D_real x0, D_real y0, D_real z0, std::vector<Solid_Node> &node, D_real t);
 	void geofile_stl(D_real x0, D_real y0, D_real z0, D_real t);
-	void geofile_stl();
 	void geofile(std::vector<Solid_Node> &node, D_real t);
 	// void sphere(D_real a, D_real b, D_real c, D_real d, D_real radius, std::vector<Solid_Node> &node, D_real t);
 	void sample_solidPoints_onTriFace();

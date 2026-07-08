@@ -16,7 +16,7 @@
 void IO_TECPLOTH::write(const D_int iter)
 {
     char fileName[1024];
-    sprintf(fileName, "sphereFlow_%f.dat", iter * LBM_Manager::pointer_me->CF_T[0]);
+    sprintf(fileName, "%s/sphereFlow_%f.dat", C_OUTPUT_DIR, iter * LBM_Manager::pointer_me->CF_T[0]);
     
     D_Phy_real Convert_U = LBM_Manager::pointer_me->CF_U;
 
@@ -188,7 +188,7 @@ int IO_TECPLOTH::write_mesh_manager(std::string outfile)
 void IO_TECPLOTH::write_mesh(std::string outfile)
 {
     char fileName[1024];
-    sprintf(fileName, "%s_%s.dat", meshFileName_prefix, outfile.c_str());
+    sprintf(fileName, "%s/%s_%s.dat", C_OUTPUT_DIR, meshFileName_prefix, outfile.c_str());
 
     std::ofstream plt_file(fileName);
     if (!plt_file.is_open()) {

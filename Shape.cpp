@@ -391,11 +391,11 @@ void Shape::geofile_stl(D_real xc, D_real yc, D_real zc, D_real t)
 			istr >> triFace_tmp.faceNorm.at(2);
 			#endif
 
-			if (triFace_tmp.faceNorm.at(0) == 0 && triFace_tmp.faceNorm.at(1) == 0)
+			if (fabs(triFace_tmp.faceNorm.at(0)) < C_eps && fabs(triFace_tmp.faceNorm.at(1)) < C_eps)
 				triFace_tmp.faceDir_type = z_plane;
-			else if (triFace_tmp.faceNorm.at(0) == 0 && triFace_tmp.faceNorm.at(2) == 0)
+			else if (fabs(triFace_tmp.faceNorm.at(0)) < C_eps && fabs(triFace_tmp.faceNorm.at(2)) < C_eps)
 				triFace_tmp.faceDir_type = y_plane;
-			else if (triFace_tmp.faceNorm.at(1) == 0 && triFace_tmp.faceNorm.at(2) == 0)
+			else if (fabs(triFace_tmp.faceNorm.at(1)) < C_eps && fabs(triFace_tmp.faceNorm.at(2)) < C_eps)
 				triFace_tmp.faceDir_type = x_plane;
 			else
 				triFace_tmp.faceDir_type = non_orth;
@@ -503,6 +503,27 @@ void Shape::geofile_stl(D_real xc, D_real yc, D_real zc, D_real t)
 		iTri->vertex3.x += x_offset; iTri->vertex3.y += y_offset; iTri->vertex3.z += z_offset;
 	}
 
+		// Validate all triangle vertices are within domain bounds
+	for (std::vector<Solid_Face>::const_iterator iTri = triFace.cbegin(); iTri != triFace.cend(); ++iTri) {
+		const Solid_Node* verts[3] = {&iTri->vertex1, &iTri->vertex2, &iTri->vertex3};
+		for (int iv = 0; iv < 3; ++iv) {
+			const Solid_Node& v = *verts[iv];
+			if (v.x < (C_domain[0] - C_eps) || v.x > (C_domain[3] + C_eps) ||
+			    v.y < (C_domain[1] - C_eps) || v.y > (C_domain[4] + C_eps) ||
+			    v.z < (C_domain[2] - C_eps) || v.z > (C_domain[5] + C_eps))
+			{
+				std::stringstream warning;
+				warning << "STL vertex (" << v.x << ", " << v.y << ", " << v.z
+				        << ") after origin placement is outside C_domain ["
+				        << C_domain[0] << "," << C_domain[3] << "] x ["
+				        << C_domain[1] << "," << C_domain[4] << "] x ["
+				        << C_domain[2] << "," << C_domain[5]
+				        << "]. Check C_solid_origin and STL model size." << std::endl;
+				log_error(warning.str(), Log_function::logfile);
+			}
+		}
+	}
+
 	x0 = x_offset;
 	y0 = y_offset;
 #if (C_DIMS == 3)
@@ -516,191 +537,6 @@ void Shape::geofile_stl(D_real xc, D_real yc, D_real zc, D_real t)
 
 	//std::cout <<"center of the geometry: " << xc << ", " << yc << ", " << zc << std::endl;
 		//std::cout <<"center of the geometry: " << xc << ", " << yc << ", " << zc << std::endl;
-}
-/**
-* @brief      function to read geometry data (STL format).
-* @note       it is assumed that the range of x is from 0 to C_xb. Both y and z rely on x. Points are distributed with equal distance.
-*/
-void Shape::geofile_stl()
-{
-	std::stringstream error;
-
-	bool_enclosed = false;
-	std::istringstream istr;
-	std::string s;
-	std::ifstream file_in(F_model_path, std::ios::in);
-	if (!file_in.is_open())
-	{
-		std::stringstream error;
-		char* buffer;
-		// if ((buffer = _getcwd(NULL, 0)) == NULL)
-		if ((buffer = getcwd(NULL, 0)) == NULL)
-		{
-			perror("getcwd error");
-		}
-		else
-		{
-			printf("%s\n", buffer);
-			free(buffer);
-		}
-		error << "Can't open geometry file " << std::endl;
-		log_error(error.str(), Log_function::logfile);
-	}
-
-// 	D_real x_min = 0, y_min = 0;
-// #if (C_DIMS == 3)
-// 	D_real z_min = 0;
-// #endif
-	
-	while (std::getline(file_in, s))
-	{
-		std::string str_split,str_split2;
-		istr.str(s); istr >> str_split;
-		if ("facet" == str_split)
-		{
-			Solid_Face triFace_tmp;
-			istr >> str_split; // "normal"
-			if (str_split != "normal") {  
-				error << "Not read 'facet normal' but: " << str_split << std::endl; 
-				log_error(error.str(), Log_function::logfile);
-			}
-			istr >> triFace_tmp.faceNorm.at(0) >> triFace_tmp.faceNorm.at(1);
-			#if (C_DIMS == 3)
-			istr >> triFace_tmp.faceNorm.at(2);
-			#endif
-
-			if (triFace_tmp.faceNorm.at(0) == 0 && triFace_tmp.faceNorm.at(1) == 0)
-				triFace_tmp.faceDir_type = z_plane;
-			else if (triFace_tmp.faceNorm.at(0) == 0 && triFace_tmp.faceNorm.at(2) == 0)
-				triFace_tmp.faceDir_type = y_plane;
-			else if (triFace_tmp.faceNorm.at(1) == 0 && triFace_tmp.faceNorm.at(2) == 0)
-				triFace_tmp.faceDir_type = x_plane;
-			else
-				triFace_tmp.faceDir_type = non_orth;
-			
-
-			std::getline(file_in, s); istr.str(""); istr.clear(); istr.str(s);
-			istr >> str_split >> str_split2;
-			if (str_split != "outer" || str_split2 != "loop") {
-				error << "Not read 'facet normal' but: " << str_split << std::endl;
-				log_error(error.str(), Log_function::logfile);
-			}
-
-			// Read three verteies of the face triangle
-			{
-				std::getline(file_in,s); istr.str(""); istr.clear(); istr.str(s); 
-				istr >> str_split;
-				if (str_split != "vertex") {
-					error << "Not read 'vortex' but: " << str_split << std::endl;
-					log_error(error.str(), Log_function::logfile);
-				}
-				istr >> triFace_tmp.vertex1.x >> triFace_tmp.vertex1.y;
-				#if (C_DIMS == 3)
-				istr >> triFace_tmp.vertex1.z;
-				#endif
-				// Unified boundary validation for arbitrary solid positioning
-				if ((triFace_tmp.vertex1.x < (C_domain[0]+C_eps)) || (triFace_tmp.vertex1.x > (C_domain[3]+C_eps)) ||
-				    (triFace_tmp.vertex1.y < (C_domain[1]+C_eps)) || (triFace_tmp.vertex1.y > (C_domain[4]+C_eps)) ||
-					(triFace_tmp.vertex1.z < (C_domain[2]+C_eps)) || (triFace_tmp.vertex1.z > (C_domain[5]+C_eps)))
-				{
-					std::stringstream warning;
-					warning << "coordinate = " << "("<<triFace_tmp.vertex1.x<<", "<< triFace_tmp.vertex1.y<<", "<< triFace_tmp.vertex1.z <<")" << " exceeds the compuational domain." << std::endl;
-					log_error(warning.str(), Log_function::logfile);
-				}
-			}
-			{
-				std::getline(file_in,s); istr.str(""); istr.clear(); istr.str(s);
-				istr >> str_split;
-				if (str_split != "vertex") {
-					error << "Not read 'vortex' but: " << str_split << std::endl;
-					log_error(error.str(), Log_function::logfile);
-				}
-				istr >> triFace_tmp.vertex2.x >> triFace_tmp.vertex2.y;
-				#if (C_DIMS == 3)
-				istr >> triFace_tmp.vertex2.z;
-				#endif
-				// Unified boundary validation for arbitrary solid positioning
-				if ((triFace_tmp.vertex2.x < (C_domain[0]+C_eps)) || (triFace_tmp.vertex2.x > (C_domain[3]+C_eps)) ||
-				    (triFace_tmp.vertex2.y < (C_domain[1]+C_eps)) || (triFace_tmp.vertex2.y > (C_domain[4]+C_eps)) ||
-					(triFace_tmp.vertex2.z < (C_domain[2]+C_eps)) || (triFace_tmp.vertex2.z > (C_domain[5]+C_eps)))
-				{
-					std::stringstream warning;
-					warning << "coordinate = " << "("<<triFace_tmp.vertex2.x<<", "<< triFace_tmp.vertex2.y<<", "<< triFace_tmp.vertex2.z <<")" << " exceeds the compuational domain." << std::endl;
-					log_error(warning.str(), Log_function::logfile);
-				}
-			}
-			{
-				std::getline(file_in,s); istr.str(""); istr.clear(); istr.str(s);
-				istr >> str_split;
-				if (str_split != "vertex") {
-					error << "Not read 'vortex' but: " << str_split << std::endl;
-					log_error(error.str(), Log_function::logfile);
-				}
-				istr >> triFace_tmp.vertex3.x >> triFace_tmp.vertex3.y;
-				#if (C_DIMS == 3)
-				istr >> triFace_tmp.vertex3.z;
-				#endif
-				// Unified boundary validation for arbitrary solid positioning
-				if ((triFace_tmp.vertex3.x < (C_domain[0]+C_eps)) || (triFace_tmp.vertex3.x > (C_domain[3]+C_eps)) ||
-				    (triFace_tmp.vertex3.y < (C_domain[1]+C_eps)) || (triFace_tmp.vertex3.y > (C_domain[4]+C_eps)) ||
-					(triFace_tmp.vertex3.z < (C_domain[2]+C_eps)) || (triFace_tmp.vertex3.z > (C_domain[5]+C_eps)))
-				{
-					std::stringstream warning;
-					warning << "coordinate = " << "("<<triFace_tmp.vertex3.x<<", "<< triFace_tmp.vertex3.y<<", "<< triFace_tmp.vertex3.z <<")" << " exceeds the compuational domain." << std::endl;
-					log_error(warning.str(), Log_function::logfile);
-				}
-			}
-			std::getline(file_in,s); istr.str(""); istr.clear(); istr.str(s); 
-			istr >> str_split;
-			if (str_split != "endloop") {
-					error << "Not read 'endloop' but: " << str_split << std::endl;
-					log_error(error.str(), Log_function::logfile);
-			}
-			std::getline(file_in,s); istr.str(""); istr.clear(); istr.str(s); 
-			istr >> str_split;
-			if (str_split != "endfacet") {
-					error << "Not read 'endfacet' but: " << str_split << std::endl;
-					log_error(error.str(), Log_function::logfile);
-			}
-			triFace.push_back(triFace_tmp);
-		}
-		istr.str(""); istr.clear();
-	}
-
-	// Sample points on the triangle surface to add the solid points
-	sample_solidPoints_onTriFace();
-
-	numb_nodes = node.size();
-
-	// std::ofstream sampledNode_file;
-	// sampledNode_file.open("sampled_node.vtk", std::ios::out);
-	// sampledNode_file << "# vtk DataFile Version 2.0\n\n";
-	// sampledNode_file << "ASCII\nDATASET POLYDATA\n";
-	// sampledNode_file << "POINTS " << numb_nodes << " float\n";
-	// for (auto sampled_nodes_iter : node) {
-	// 	sampledNode_file << sampled_nodes_iter.x << " " << sampled_nodes_iter.y << " " << sampled_nodes_iter.z << "\n";
-	// }
-	// sampledNode_file << "VERTICES " << numb_nodes << " " << 2*numb_nodes << std::endl;
-	// for (int i = 1; i <= numb_nodes; ++i) {
-	// 	sampledNode_file << "1 " << i << "\n";
-	// }
-	// sampledNode_file.close();
-
-	printf("------ Read STL File and Sample Nodes ------\n");
-	std::cout << "  Num of Node for construct AMR: " << numb_nodes << std::endl;
-	std::cout << "  Num of triFace: " << triFace.size() << std::endl;
-	printf("------ ------------------------------ ------\n");
-	// for (Solid_Node inode : node) {
-	// 	if (inode.x < x_min)
-	// 		x_min = inode.x;
-	// 	if (inode.y < y_min)
-	// 		y_min = inode.y;
-	// 	if (inode.z < z_min)
-	// 		z_min = inode.z;
-	// }
-
-	file_in.close();
-
 }
 
 
@@ -1053,6 +889,63 @@ D_real Shape::two_points_length(D_vec a, D_vec b)
 	return (D_real)sqrtf64((b.x-a.x)*(b.x-a.x) + (b.y-a.y)*(b.y-a.y) + (b.z-a.z)*(b.z-a.z));
 }
 
+D_real Shape::point_triangle_distance(D_vec p, Solid_Face triFace)
+{
+	// Ericson, Real-Time Collision Detection: ClosestPtPointTriangle.
+	// Returns the shortest distance from p to the triangle (a,b,c).
+	D_vec a(triFace.vertex1.x, triFace.vertex1.y, triFace.vertex1.z);
+	D_vec b(triFace.vertex2.x, triFace.vertex2.y, triFace.vertex2.z);
+	D_vec c(triFace.vertex3.x, triFace.vertex3.y, triFace.vertex3.z);
+
+	D_vec ab = b - a;
+	D_vec ac = c - a;
+	D_vec ap = p - a;
+
+	D_real d1 = dot_product(ab, ap);
+	D_real d2 = dot_product(ac, ap);
+	if (d1 <= 0.0 && d2 <= 0.0) return two_points_length(p, a);  // vertex region A
+
+	D_vec bp = p - b;
+	D_real d3 = dot_product(ab, bp);
+	D_real d4 = dot_product(ac, bp);
+	if (d3 >= 0.0 && d4 <= d3) return two_points_length(p, b);    // vertex region B
+
+	D_real vc = d1 * d4 - d3 * d2;
+	if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) {
+		D_real v = d1 / (d1 - d3);
+		D_vec proj(a.x + ab.x * v, a.y + ab.y * v, a.z + ab.z * v);
+		return two_points_length(p, proj);  // edge AB
+	}
+
+	D_vec cp = p - c;
+	D_real d5 = dot_product(ab, cp);
+	D_real d6 = dot_product(ac, cp);
+	if (d6 >= 0.0 && d5 <= d6) return two_points_length(p, c);    // vertex region C
+
+	D_real vb = d5 * d2 - d1 * d6;
+	if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) {
+		D_real w = d2 / (d2 - d6);
+		D_vec proj(a.x + ac.x * w, a.y + ac.y * w, a.z + ac.z * w);
+		return two_points_length(p, proj);  // edge AC
+	}
+
+	D_real va = d3 * d6 - d5 * d4;
+	if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+		D_real w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+		D_vec proj(b.x + (c.x - b.x) * w, b.y + (c.y - b.y) * w, b.z + (c.z - b.z) * w);
+		return two_points_length(p, proj);  // edge BC
+	}
+
+	// face region — project p onto the triangle plane
+	D_real denom = 1.0 / (va + vb + vc);
+	D_real v = vb * denom;
+	D_real w = vc * denom;
+	D_vec proj(a.x + ab.x * v + ac.x * w,
+	           a.y + ab.y * v + ac.y * w,
+	           a.z + ab.z * v + ac.z * w);
+	return two_points_length(p, proj);
+}
+
 #define X 0
 #define Y 1
 #define Z 2
@@ -1258,22 +1151,18 @@ VertexBox Solid_Face::create_triFace_AABB()
 
 	D_real ddx = C_dx / two_power_n(C_max_level);
 
-	D_int box_p0_x = static_cast<D_int>(leftSouthBot.x / ddx + C_eps);
-	D_int box_p0_y = static_cast<D_int>(leftSouthBot.y / ddx + C_eps);
-	D_int box_p0_z = static_cast<D_int>(leftSouthBot.z / ddx + C_eps);
+		// Expand AABB by 1 cell in each direction to capture all surface-facing cells
+	// box_p1 = floor(max/ddx) + 2. The previous code used +1 on the high
+	// side, which made the halo asymmetric (-1 low, 0 high) and skipped every
+	// cell on the solid-interior side of each triangle — that's why
+	// nSameDirFalse was 0 and no SURFACE cells were ever produced.
+	D_int box_p0_x = static_cast<D_int>(leftSouthBot.x / ddx + C_eps) - 1;
+	D_int box_p0_y = static_cast<D_int>(leftSouthBot.y / ddx + C_eps) - 1;
+	D_int box_p0_z = static_cast<D_int>(leftSouthBot.z / ddx + C_eps) - 1;
 
-	D_int box_p1_x = static_cast<D_int>(rightNorthTop.x / ddx + C_eps);
-	D_int box_p1_y = static_cast<D_int>(rightNorthTop.y / ddx + C_eps);
-	D_int box_p1_z = static_cast<D_int>(rightNorthTop.z / ddx + C_eps);
-
-	// std::cout << "box_p0_x " << box_p0_x << " box_p0_y " << box_p0_y << " box_p0_z " << box_p0_z << std::endl;
-
-	if (box_p0_x == box_p1_x)
-		box_p1_x++;
-	if (box_p0_y == box_p1_y)
-		box_p1_y++;
-	if (box_p0_z == box_p1_z)
-		box_p1_z++;
+	D_int box_p1_x = static_cast<D_int>(rightNorthTop.x / ddx + C_eps) + 2;
+	D_int box_p1_y = static_cast<D_int>(rightNorthTop.y / ddx + C_eps) + 2;
+	D_int box_p1_z = static_cast<D_int>(rightNorthTop.z / ddx + C_eps) + 2;
 
 	D_morton leftSouthBot_code = Morton_Assist::pointer_me->morton_encode(box_p0_x, box_p0_y, box_p0_z);
 	D_morton rightNorthTop_code = Morton_Assist::pointer_me->morton_encode(box_p1_x, box_p1_y, box_p1_z);

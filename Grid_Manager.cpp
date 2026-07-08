@@ -101,7 +101,7 @@ D_uint niz = static_cast <D_uint> ((C_domain[5]-C_domain[2]) / C_dx + C_eps);
 	// 	generate_intermediate(ilevel);
 	// }
 
-	// generate_background();
+	generate_background();
 
 	// std::cout << "After generate_background" << std::endl;
 
@@ -410,7 +410,6 @@ void Grid_Manager::generate_inner()
 
 	// delete nodes on overlaping layers
 	check_merge_nodes(ilevel, refine_nodes, map_outer);
-	gr_NoIB[3].coarse2fine.at(iboundary2_coarse) = map_outer;
 
 	// find iboundary2
 	search_inter_boundary(ilevel, iboundary1, iboundary2, iboundary2_coarse, map_outer, refine_nodes, boundary_x_temp, boundary_y_temp, boundary_z_temp);
@@ -1216,10 +1215,10 @@ void Grid_Manager::search_nodes_near_solid(unsigned int ilevel, D_mapint &neares
 #endif		
 	}
 
-	D_real bx0_temp = Solid_Manager::pointer_me->shape_offset_x0_grid + C_eps;
-	D_real by0_temp = Solid_Manager::pointer_me->shape_offset_y0_grid + C_eps;
+	D_real bx0_temp = C_domain[0] + C_eps;
+	D_real by0_temp = C_domain[1] + C_eps;
 #if(C_DIMS == 3)
-	D_real bz0_temp = Solid_Manager::pointer_me->shape_offset_z0_grid + C_eps;
+	D_real bz0_temp = C_domain[2] + C_eps;
 #endif
 	// generate nodes at ilevel in refine_nodes based on those at ilevel - 1 in nodes_level1 
 	for (D_mapint::iterator iter = nodes_level1.begin(); iter != nodes_level1.end(); ++iter)
@@ -1565,10 +1564,10 @@ void Grid_Manager::search_nodes_near_solid(const unsigned int ilevel, D_mapint &
 #endif		
 	} // end for points in nearest_center
 
-	D_real bx0_temp = Solid_Manager::pointer_me->shape_offset_x0_grid + C_eps;
-	D_real by0_temp = Solid_Manager::pointer_me->shape_offset_y0_grid + C_eps;
+	D_real bx0_temp = C_domain[0] + C_eps;
+	D_real by0_temp = C_domain[1] + C_eps;
 #if(C_DIMS == 3)
-	D_real bz0_temp = Solid_Manager::pointer_me->shape_offset_z0_grid + C_eps;
+	D_real bz0_temp = C_domain[2] + C_eps;
 #endif
 	// generate nodes at ilevel in refine_nodes based on those at ilevel - 1 in nodes_level1 
 	for (D_mapint::iterator iter = nodes_level1.begin(); iter != nodes_level1.end(); ++iter)
@@ -5020,10 +5019,10 @@ void Grid_Manager::generate_intermediate(unsigned int ilevel)
 	bool bool_extend_z0 = true, bool_extend_z1 = true;
 #endif
 
-	D_real bx0_temp = Solid_Manager::pointer_me->shape_offset_x0_grid + C_eps;
-	D_real by0_temp = Solid_Manager::pointer_me->shape_offset_y0_grid + C_eps;
+	D_real bx0_temp = C_domain[0] + C_eps;
+	D_real by0_temp = C_domain[1] + C_eps;
 #if(C_DIMS == 3)
-	D_real bz0_temp = Solid_Manager::pointer_me->shape_offset_z0_grid + C_eps;
+	D_real bz0_temp = C_domain[2] + C_eps;
 #endif
 	for (unsigned int iextend = 1; iextend < (extend_temp + C_extend_max); ++iextend)
 	{

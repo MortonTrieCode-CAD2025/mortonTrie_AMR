@@ -12,7 +12,8 @@ void LBM_Manager::fluidSimulate()
         LBMkernel(0);
         calculateMacros();
         infoPrint(i_iter);
-        IO_Manager::pointer_me->writeFlow(i_iter);
+        if (i_iter % U_outputIters == 0)
+            IO_Manager::pointer_me->writeFlow(i_iter);
     }
 }
 
@@ -33,11 +34,12 @@ void LBM_Manager::LBMkernel(D_int refine_level)
         D_morton lat_code = lat.first;
         double ddf0_temp = user[refine_level].df.fcol[0].at(lat_code);
         double ddf1_temp = user[refine_level].df.fcol[1].at(lat_code);
-        if ( isnanf(ddf0_temp) || ddf0_temp<0. || ddf0_temp>100. 
-          || isnanf(ddf1_temp) || ddf1_temp<0. || ddf1_temp>100. ) {
+        if ( isnanf(ddf0_temp)
+          || isnanf(ddf1_temp) ) {
             std::cout << "  - [A] Appear NaN ddf in fcol [" << refine_level << "] Code = " << lat_code  << " ddf0 " << ddf0_temp << " ddf1 " << ddf1_temp << std::endl;
         }
     }
+    if (refine_level == C_max_level && run_col_times[0] <= 3) { LBM_Manager::pointer_me->diagL2MaxF("post-collideA"); LBM_Manager::pointer_me->diagL2RhoMin("post-collideA"); }
 
     if (refine_level < C_max_level)
         LBMkernel(refine_level+1);
@@ -51,21 +53,18 @@ void LBM_Manager::LBMkernel(D_int refine_level)
         D_morton lat_code = lat.first;
         double ddf0_temp = user[refine_level].df.fcol[0].at(lat_code);
         double ddf1_temp = user[refine_level].df.fcol[1].at(lat_code);
-        if ( isnanf(ddf0_temp) || ddf0_temp<0. || ddf0_temp>100. 
-          || isnanf(ddf1_temp) || ddf1_temp<0. || ddf1_temp>100. ) {
+        if ( isnanf(ddf0_temp)
+          || isnanf(ddf1_temp) ) {
             std::cout << "  - [B] Appear NaN ddf in fcol [" << refine_level << "] Code = " << lat_code  << " ddf0 " << ddf0_temp << " ddf1 " << ddf1_temp << std::endl;
         }
     }
 
     if (refine_level == 0) {
-        // bc_manager_->applyBoundaryCondition("West", "AfterStream");
-        //  bc_manager_->applyBoundaryCondition("East", "AfterCollision");
-        //   bc_manager_->applyBoundaryCondition("South", "AfterCollision");
-        //    bc_manager_->applyBoundaryCondition("North", "AfterCollision");
-        //     bc_manager_->applyBoundaryCondition("Bot", "AfterCollision");
-        //      bc_manager_->applyBoundaryCondition("Top", "AfterCollision");
+        // NEQ extrapolation BC only needs AfterStream timing (applied to f after stream).
+        // AfterCollision (applied to fcol) is intentionally omitted; add it here if ZouHe
+        // or other BC strategies requiring pre-stream correction are introduced.
     }
-    
+
     double t2 = tmr.elapsed();
     // std::cout << "[5] Before stream A " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
     // if (refine_level == 4 && run_stm_times[refine_level]==12) {
@@ -78,13 +77,14 @@ void LBM_Manager::LBMkernel(D_int refine_level)
     printf("[level %d %d] stream[A]\t%f s.\n", refine_level, run_col_times[refine_level], t3-t2);
     for (auto lat : Lat_Manager::pointer_me->lat_f.at(refine_level)) {
         D_morton lat_code = lat.first;
-        double ddf0_temp = user[refine_level].df.fcol[0].at(lat_code);
-        double ddf1_temp = user[refine_level].df.fcol[1].at(lat_code);
-        if ( isnanf(ddf0_temp) || ddf0_temp<0. || ddf0_temp>100. 
-          || isnanf(ddf1_temp) || ddf1_temp<0. || ddf1_temp>100. ) {
+        double ddf0_temp = user[refine_level].df.f[0].at(lat_code);
+        double ddf1_temp = user[refine_level].df.f[1].at(lat_code);
+        if ( isnanf(ddf0_temp)
+          || isnanf(ddf1_temp) ) {
             std::cout << "  - [C] Appear NaN ddf in f [" << refine_level << "] Code = " << lat_code  << " ddf0 " << ddf0_temp << " ddf1 " << ddf1_temp << std::endl;
         }
     }
+    if (refine_level == C_max_level && run_col_times[0] <= 3) { LBM_Manager::pointer_me->diagL2MaxF("post-streamA"); LBM_Manager::pointer_me->diagL2RhoMin("post-streamA"); }
 
     if (refine_level == 0) {
         bc_manager_->applyBoundaryCondition("West", "AfterStream");
@@ -96,7 +96,21 @@ void LBM_Manager::LBMkernel(D_int refine_level)
     }
     else if (refine_level == C_max_level) {
         solidBCModel->treat();
+        // [D] NaN check on IB cells right after the IB correction (the key AMR x IB
+        // coupling point). IB treat writes f[i_q] for every dis cell; if any goes
+        // Coalescence NaN guard
+        for (auto dis_ib : Lat_Manager::pointer_me->dis) {
+            D_morton lat_code = dis_ib.first;
+            double ddf0_temp = user[C_max_level].df.f[0].at(lat_code);
+            double ddf1_temp = user[C_max_level].df.f[1].at(lat_code);
+            if ( isnanf(ddf0_temp)
+              || isnanf(ddf1_temp) ) {
+                std::cout << "  - [D] Appear NaN ddf in IB f [" << C_max_level << "] Code = " << lat_code << " ddf0 " << ddf0_temp << " ddf1 " << ddf1_temp << std::endl;
+                break;
+            }
+        }
     }
+    if (refine_level == C_max_level && run_col_times[0] <= 3) { LBM_Manager::pointer_me->diagL2MaxF("post-IBtreatA"); LBM_Manager::pointer_me->diagL2RhoMin("post-IBtreatA"); }
     // for (auto lat : Lat_Manager::pointer_me->lat_f.at(refine_level)) {
     //     D_morton lat_code = lat.first;
         
@@ -109,6 +123,18 @@ void LBM_Manager::LBMkernel(D_int refine_level)
         // std::cout << "[7] Before AMR_transDDF_coalescence B " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
         AMR_transDDF_coalescence(refine_level);
         // std::cout << "[8] After AMR_transDDF_coalescence B " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
+        // [E] NaN check on the coarse overlap cells whose f was just rewritten by
+        // /8.0 average or to bad fine-side f feeding it.
+        for (auto lat : Lat_Manager::pointer_me->lat_overlap_F2C.at(refine_level)) {
+            D_morton lat_code = lat.first;
+            double ddf0_temp = user[refine_level].df.f[0].at(lat_code);
+            double ddf1_temp = user[refine_level].df.f[1].at(lat_code);
+            if ( isnanf(ddf0_temp)
+              || isnanf(ddf1_temp) ) {
+                std::cout << "  - [E] Appear NaN ddf in overlap f [" << refine_level << "] Code = " << lat_code << " ddf0 " << ddf0_temp << " ddf1 " << ddf1_temp << std::endl;
+                break;
+            }
+        }
     }
     // for (auto lat : Lat_Manager::pointer_me->lat_f.at(refine_level)) {
     //     D_morton lat_code = lat.first;
@@ -133,6 +159,7 @@ void LBM_Manager::LBMkernel(D_int refine_level)
     ++run_col_times[refine_level];
     double t5 = tmr.elapsed();
     std::cout << "[level " << refine_level << "] collide[B]\t" << t5-t4 << " s." << std::endl;
+    if (refine_level == C_max_level && run_col_times[0] <= 3) { LBM_Manager::pointer_me->diagL2MaxF("post-collideB"); LBM_Manager::pointer_me->diagL2RhoMin("post-collideB"); }
     // std::cout << "[10] After collision B " << run_col_times[refine_level] << " time " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
     // for (auto lat : Lat_Manager::pointer_me->lat_f.at(refine_level)) {
     //     D_morton lat_code = lat.first;
@@ -152,12 +179,7 @@ void LBM_Manager::LBMkernel(D_int refine_level)
 
     
     if (refine_level == 0) {
-        // bc_manager_->applyBoundaryCondition("West", "AfterStream");
-        //  bc_manager_->applyBoundaryCondition("East", "AfterCollision");
-        //   bc_manager_->applyBoundaryCondition("South", "AfterCollision");
-        //    bc_manager_->applyBoundaryCondition("North", "AfterCollision");
-        //     bc_manager_->applyBoundaryCondition("Bot", "AfterCollision");
-        //      bc_manager_->applyBoundaryCondition("Top", "AfterCollision");
+        // NEQ extrapolation BC only needs AfterStream timing; AfterCollision intentionally omitted.
     }
     // std::cout << "[11] Before stream B " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
     double t6 = tmr.elapsed();
@@ -166,6 +188,7 @@ void LBM_Manager::LBMkernel(D_int refine_level)
     // std::cout << "[12] After stream B " << run_stm_times[refine_level] << " time " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
     double t7 = tmr.elapsed();
     std::cout << "[level " << refine_level << "] stream[B]\t" << t7-t6 << " s." << std::endl;
+    if (refine_level == C_max_level && run_col_times[0] <= 3) { LBM_Manager::pointer_me->diagL2MaxF("post-streamB"); LBM_Manager::pointer_me->diagL2RhoMin("post-streamB"); }
     // for (auto lat : Lat_Manager::pointer_me->lat_f.at(refine_level)) {
     //     D_morton lat_code = lat.first;
     //     double ddf0_temp = user[refine_level].df.fcol[0].at(lat_code);

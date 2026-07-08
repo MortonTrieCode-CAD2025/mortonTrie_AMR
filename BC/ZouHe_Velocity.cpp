@@ -1,14 +1,8 @@
 /**
- * @file ZouHe_Velocity.cpp
- * @brief Non-equilibrum Bounce-Back (ZouHe) Velocity BC = Dirichlet BC = Flux BC (suitable for Low Re Number)
- * @ref M. Hecht and J. Harting, “Implementation of on-site velocity boundary conditions for d3q19 lattice boltzmann simulations,” Journal of Statistical Mechanics: Theory and Experiment, vol. 2010, no. 01, 2010. doi:10.1088/1742-5468/2010/01/p01018 
- *      M. Hecht and J. Harting, “Erratum: Implementation of on-site velocity boundary conditions for d3q19 lattice boltzmann simulations,” Journal of Statistical Mechanics: Theory and Experiment, vol. 2013, no. 02, 2013. doi:10.1088/1742-5468/2013/02/e02001 
- * @date 2023-07-20
- */
+// ZouHe Velocity BC: Hecht & Harting (2010), J. Stat. Mech.
 
-#define BC_NO_GHOST
-#ifndef BC_NO_GHOST
 #include "BC/ZouHe_Velocity.hpp"
+#if (C_Q == 19)
 #include "Lat_Manager.hpp"
 
 void nonEquilibrumBounceBack_Velocity_West::initialBCStrategy()

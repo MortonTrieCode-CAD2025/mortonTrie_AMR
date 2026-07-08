@@ -1,0 +1,17 @@
+# compile output
+*.o
+*.exe
+*.out
+obj/
+farseer
+output/
+*.log
+*.xmf
+*.h5
+*.plt
+*.md
+!README.md
+*.bak
+amr_bak
+.vscode/
+.gitignore

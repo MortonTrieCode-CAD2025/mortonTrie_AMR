@@ -1,6 +1,18 @@
 #include "Lat_Manager.hpp"
 #include "Solid_Manager.h"
 #include "Morton_Assist.h"
+#include <map>
+
+// Diagnostic counters for update_cutting_lattices
+long g_diag_cellsTested = 0;
+long g_diag_cellsInGrid = 0;
+long g_diag_cellsInLatF = 0;
+long g_diag_sameDirTrue = 0;
+long g_diag_sameDirFalse = 0;
+long g_diag_close = 0;
+long g_diag_far = 0;
+double g_diag_minDist = 1e30;
+double g_diag_maxDist = -1.0;
 
 void Lat_Manager::voxelize()
 {
@@ -384,20 +396,26 @@ void Lat_Manager::update_innerLevel_lattices()
 {
     Grid_IB* solidgrid_ptr = &(Grid_Manager::pointer_me->gr_inner);
 
-    //////////////////////////////////////////////////
-    //  The step of constructing the inner lattice  //
-    //////////////////////////////////////////////////
-    //
-    // lat_f[C_max_level] = FLUID + IB (need to execute the LBM simulation)
-    // lat_sf = SURFACE + SOLID (no need to LBM)
-    // 1. Classify the interface layer of overlapping 
-    // 2. Convinced SOLID lattice  --+--> laf_sf
-    // 3. Others classified into TBD --+--> lat_f[C_max_level]
-    // 4. [func](update_cutting_lattices) Classify TBD of lat_f into IB or SURFACE
-    //              IB --+--> lat_f       SURFACE --+--> lat_sf
-    // 5. [func](propagate_fluid_lattices) Classify TBD of lat_f into FLUID or SOLID
-    //            FLUID --+--> lat_f       SOLID --+--> lat_sf
+    // Construct inner lattice: classify cells into lat_f (FLUID+IB) and lat_sf (SURFACE+SOLID)
 
+    // Distribution of gr_inner.flag values
+    {
+        std::map<int,long> flagHist;
+        long nGrid = 0;
+        for (const auto& kv : solidgrid_ptr->grid) { ++flagHist[kv.second.flag]; ++nGrid; }
+        std::cout << "[diag] gr_inner.grid size = " << nGrid << std::endl;
+        std::cout << "[diag] gr_inner.flag histogram (flag : count):" << std::endl;
+        for (const auto& fh : flagHist) {
+            std::cout << "       flag=" << fh.first << " : " << fh.second
+                      << (fh.first < 0 ? "  (interface, <0)"
+                          : (fh.first == Grid_Manager::pointer_me->flag_ghost ? "  (flag_ghost)"
+                          : (fh.first == Grid_Manager::pointer_me->flag_inner ? "  (flag_inner)"
+                          : (fh.first == 2 ? "  (flag_refine)" : ""))))
+                      << std::endl;
+        }
+    }
+
+    long nSkipNoCell = 0, nClassOverlapC2F = 0, nClassSolid = 0, nClassTBD = 0;
 
     for (auto iter : solidgrid_ptr->grid)
     {
@@ -412,64 +430,85 @@ void Lat_Manager::update_innerLevel_lattices()
         D_morton key_yz1 = Morton_Assist::find_z1(key_y1, C_max_level);
         D_morton key_xyz1 = Morton_Assist::find_z1(key_xy1, C_max_level);
 
-        // insure all vertex at this level, not cross the inner level
-        bool bool_xyz = (solidgrid_ptr->grid.find(key_x1) != solidgrid_ptr->grid.end()) && 
-                         (solidgrid_ptr->grid.find(key_y1) != solidgrid_ptr->grid.end()) && 
-                          (solidgrid_ptr->grid.find(key_z1) != solidgrid_ptr->grid.end()) && 
-                           (solidgrid_ptr->grid.find(key_xy1) != solidgrid_ptr->grid.end()) && 
-                            (solidgrid_ptr->grid.find(key_xz1) != solidgrid_ptr->grid.end()) && 
-                             (solidgrid_ptr->grid.find(key_yz1) != solidgrid_ptr->grid.end()) && 
-                              (solidgrid_ptr->grid.find(key_xyz1) != solidgrid_ptr->grid.end());
+        // Look up each of the 8 corner neighbours. With C_extend_ghost=0 the
+        // grid contains no cells inside the solid, so cells straddling the
+        // sphere surface have some neighbours missing. The original code
+        // skipped any cell with a missing neighbour, which discarded ~971 of
+        // the ~1285 IB-shell cells (they sit on the solid-side edge of gr_inner
+        // and one of their +x/+y/+z neighbours is inside the sphere). Those
+        // skips starved update_cutting_lattices of most of its IB candidates.
+        // Instead, treat a missing neighbour as "not interface, not ghost":
+        // the cell falls through to TBD, where update_cutting_lattices can
+        // still promote it to IB based on the distance test.
+        auto get_flag = [&](D_morton key, int& flag_out) -> bool {
+            auto it = solidgrid_ptr->grid.find(key);
+            if (it == solidgrid_ptr->grid.end()) { flag_out = 0; return false; }
+            flag_out = it->second.flag; return true;
+        };
 
-        if (!bool_xyz)
-            continue;
+        int f_cur, f_x1, f_y1, f_z1, f_xy1, f_xz1, f_yz1, f_xyz1;
+        bool p_cur = get_flag(key_current, f_cur);
+        bool p_x1  = get_flag(key_x1,     f_x1);
+        bool p_y1  = get_flag(key_y1,     f_y1);
+        bool p_z1  = get_flag(key_z1,     f_z1);
+        bool p_xy1 = get_flag(key_xy1,    f_xy1);
+        bool p_xz1 = get_flag(key_xz1,    f_xz1);
+        bool p_yz1 = get_flag(key_yz1,    f_yz1);
+        bool p_xyz1= get_flag(key_xyz1,   f_xyz1);
+        bool all_present = p_cur && p_x1 && p_y1 && p_z1 && p_xy1 && p_xz1 && p_yz1 && p_xyz1;
 
-        if (solidgrid_ptr->grid.at(key_current).flag < 0 &&
-             solidgrid_ptr->grid.at(key_x1).flag < 0 &&
-              solidgrid_ptr->grid.at(key_y1).flag < 0 &&
-               solidgrid_ptr->grid.at(key_z1).flag < 0 &&
-                solidgrid_ptr->grid.at(key_xy1).flag < 0 &&
-                 solidgrid_ptr->grid.at(key_xz1).flag < 0 &&
-                  solidgrid_ptr->grid.at(key_yz1).flag < 0 &&
-                   solidgrid_ptr->grid.at(key_xyz1).flag < 0) {
+        if (!all_present) { ++nSkipNoCell; /* fall through to TBD below, do NOT continue */ }
+
+        bool all_interface = (f_cur < 0 && f_x1 < 0 && f_y1 < 0 && f_z1 < 0 &&
+                              f_xy1 < 0 && f_xz1 < 0 && f_yz1 < 0 && f_xyz1 < 0);
+        int fg = Grid_Manager::pointer_me->flag_ghost;
+        bool any_ghost = (f_cur == fg || f_x1 == fg || f_y1 == fg || f_z1 == fg ||
+                          f_xy1 == fg || f_xz1 == fg || f_yz1 == fg || f_xyz1 == fg);
+
+        if (all_present && all_interface) {
             // the overlap lattices for interpolation between coarse and fine
             lat_overlap_C2F.at(C_max_level).insert(make_pair(key_current,Cell(Cell_Flag::OVERLAP_C2F)));
+            ++nClassOverlapC2F;
         }
-        else if (solidgrid_ptr->grid.at(key_current).flag == Grid_Manager::pointer_me->flag_ghost ||
-                  solidgrid_ptr->grid.at(key_x1).flag == Grid_Manager::pointer_me->flag_ghost ||
-                   solidgrid_ptr->grid.at(key_y1).flag == Grid_Manager::pointer_me->flag_ghost ||
-                    solidgrid_ptr->grid.at(key_z1).flag == Grid_Manager::pointer_me->flag_ghost ||
-                     solidgrid_ptr->grid.at(key_xy1).flag == Grid_Manager::pointer_me->flag_ghost ||
-                      solidgrid_ptr->grid.at(key_xz1).flag == Grid_Manager::pointer_me->flag_ghost ||
-                       solidgrid_ptr->grid.at(key_yz1).flag == Grid_Manager::pointer_me->flag_ghost ||
-                        solidgrid_ptr->grid.at(key_xyz1).flag == Grid_Manager::pointer_me->flag_ghost) {
+        else if (all_present && any_ghost) {
             // the lattices inside the SOLID
             lat_sf.insert(make_pair(key_current,Cell(Cell_Flag::SOLID)));
+            ++nClassSolid;
         } else {
+            // TBD — includes cells with missing neighbours (solid-side edge of
+            // gr_inner). update_cutting_lattices will decide IB vs leave-TBD.
             lat_f.at(C_max_level).insert(make_pair(key_current,Cell(Cell_Flag::TBD)));
+            ++nClassTBD;
         }
 
     }
 
+    std::cout << "[diag] update_innerLevel_lattices classification:" << std::endl;
+    std::cout << "       skipped (cell incomplete) = " << nSkipNoCell << std::endl;
+    std::cout << "       -> OVERLAP_C2F            = " << nClassOverlapC2F << std::endl;
+    std::cout << "       -> SOLID (lat_sf)         = " << nClassSolid << std::endl;
+    std::cout << "       -> TBD (lat_f[maxlevel])  = " << nClassTBD << std::endl;
+
     update_cutting_lattices();
 
-    // propagate_fluid_lattices();
+    propagate_fluid_lattices();
 
     update_solid_lattices();
 
-    // std::unordered_map<int, int> innerLat_flags;
-    // for (auto lat_iter : lat_f.at(C_max_level)) {
-    //     if (innerLat_flags.find(lat_iter.second.flag) == innerLat_flags.end()) {
-    //         innerLat_flags.emplace(lat_iter.second.flag, 1);
-    //     }
-    //     else {
-    //         innerLat_flags.at(lat_iter.second.flag)++;
-    //     }
-    // }
-    // for (auto flag_iter : innerLat_flags) {
-    //     std::cout << " flag" << flag_iter.first << " " << flag_iter.second;
-    // }
-    // std::cout << "\n----------- -------------------- -----------\n" << std::endl;
+    // Post-classification flag distribution in lat_f[maxlevel]
+    {
+        std::map<int,long> latFlagHist;
+        for (const auto& kv : lat_f.at(C_max_level)) ++latFlagHist[kv.second.flag];
+        std::cout << "[diag] lat_f[" << C_max_level << "] post-classification size = "
+                  << lat_f.at(C_max_level).size() << ", flag histogram:" << std::endl;
+        for (const auto& fh : latFlagHist) {
+            std::cout << "       flag=" << fh.first << " : " << fh.second << std::endl;
+        }
+        std::cout << "[diag] lat_sf size = " << lat_sf.size()
+                  << ", lat_overlap_C2F[" << C_max_level << "] = "
+                  << lat_overlap_C2F.at(C_max_level).size()
+                  << ", dis size = " << dis.size() << std::endl;
+    }
 
 }
 
@@ -698,9 +737,19 @@ void Lat_Manager::update_cutting_lattices()
 {
     Grid_IB* solidgrid_ptr = &(Grid_Manager::pointer_me->gr_inner);
     double dx_innerLat = dx.at(C_max_level);
-    double box_halfextent[3] = {dx_innerLat*0.5f, dx_innerLat*0.5f, dx_innerLat*0.5f};
 
     D_setLat add_surf;
+
+    // Diagnostic counters (reset at start of function)
+    g_diag_cellsTested = 0;
+    g_diag_cellsInGrid = 0;
+    g_diag_cellsInLatF = 0;
+    g_diag_sameDirTrue = 0;
+    g_diag_sameDirFalse = 0;
+    g_diag_close = 0;
+    g_diag_far = 0;
+    g_diag_minDist = 1e30;
+    g_diag_maxDist = -1.0;
 
     for (D_int ishape = 0; ishape < Solid_Manager::pointer_me->numb_solids; ++ishape)
     {
@@ -714,7 +763,7 @@ void Lat_Manager::update_cutting_lattices()
             Solid_Face iTri2 = iTri.triFace_offset(D_vec{iTri.faceNorm.at(0),iTri.faceNorm.at(1),iTri.faceNorm.at(2)},-1e-6);
 
             Solid_Face triFaceSet[3] = {iTri, iTri1, iTri2};
-            
+
             for (int count = 0; count < 3; ++count) {
                 Solid_Face tri = triFaceSet[count];
 
@@ -728,40 +777,86 @@ void Lat_Manager::update_cutting_lattices()
 
                             D_morton cell_in_box_code = Morton_Assist::pointer_me->morton_encode(i, j, k);
 
-                            if (solidgrid_ptr->grid.find(cell_in_box_code) != solidgrid_ptr->grid.end())
+                            auto lat_f_iter = lat_f.at(C_max_level).find(cell_in_box_code);
+                            bool in_grid = (solidgrid_ptr->grid.find(cell_in_box_code) != solidgrid_ptr->grid.end());
+                            bool in_latf = (lat_f_iter != lat_f.at(C_max_level).end());
+                            if (in_grid) ++g_diag_cellsInGrid;
+                            if (in_latf) ++g_diag_cellsInLatF;
+                            if (!in_grid || !in_latf)
                             {
-                                aabb.lat_in_aabb.insert(cell_in_box_code);
-                                Cell lat_in_box = lat_f.at(C_max_level).at(cell_in_box_code);
+                                // not a TBD lattice (already SOLID/OVERLAP) — skip to avoid out_of_range
+                                continue;
+                            }
+                            ++g_diag_cellsTested;
+                            aabb.lat_in_aabb.insert(cell_in_box_code);
 
-                                // check the intersection of current cell and facet
-                                D_vec lat_center;
-                                Morton_Assist::pointer_me->compute_coordinate(cell_in_box_code, C_max_level, lat_center.x, lat_center.y, lat_center.z);
-                                double boxcenter[3] = {lat_center.x, lat_center.y, lat_center.z};
-                                double vertex_coord[3][3] = {{tri.vertex1.x, tri.vertex1.y, tri.vertex1.z},
-                                                              {tri.vertex2.x, tri.vertex2.y, tri.vertex2.z},
-                                                               {tri.vertex3.x, tri.vertex3.y, tri.vertex3.z}};
-                                bool same_dir = dot_product((lat_center-D_vec(tri.vertex1.x,tri.vertex1.y,tri.vertex1.z)), D_vec(tri.faceNorm[0],tri.faceNorm[1],tri.faceNorm[2])) > 1e-7;
-                                if (Shape::triBoxOverlap(boxcenter, box_halfextent, vertex_coord))
-                                {
-                                    if (same_dir) {
-                                        // If the triangleFace immerses the center of the lattice 
-                                        //  (i.e., the center of the lattice is in the normal direction of the triangleFace),
-                                        //  the lattice maybe SURFACE or IB.
-                                        // The SOLID tag will be assigned by the function "propagate_fluid_lattices".
+                            // check the intersection of current cell and facet
+                            // compute_coordinate returns the corner (lower-back-left vertex); shift by dx/2 to get cell center
+                            D_vec lat_center;
+                            Morton_Assist::pointer_me->compute_coordinate(cell_in_box_code, C_max_level, lat_center.x, lat_center.y, lat_center.z);
+                            double dx_max = dx.at(C_max_level);
+                            lat_center += D_vec(dx_max*0.5, dx_max*0.5, dx_max*0.5);
+                            bool same_dir = dot_product((lat_center-D_vec(tri.vertex1.x,tri.vertex1.y,tri.vertex1.z)), D_vec(tri.faceNorm[0],tri.faceNorm[1],tri.faceNorm[2])) > 1e-7;
+                            if (same_dir) ++g_diag_sameDirTrue; else ++g_diag_sameDirFalse;
+                            // sphere.stl (and any standard STL) carries OUTWARD face normals, so
+                            //   same_dir == true  -> cell center is OUTSIDE the solid (in the fluid region)
+                            //   same_dir == false -> cell center is INSIDE the solid
+                            // IB cells must sit in the FLUID region (outside) and SURFACE cells in the SOLID
+                            // region (inside); FLUID seeds must also be outside so BFS can flood the connected
+                            // fluid region. The original code had this inverted, which seeded FLUID inside the
+                            // sphere — BFS could not cross the IB/SURFACE shell, every TBD collapsed to SOLID
+                            // in update_solid_lattices, and lat_f[C_max_level] ended up empty (sphere invisible).
+                            //
+                            // Use point-triangle distance instead of triBoxOverlap. The SAT-based
+                            // triBoxOverlap returns false for most cells around small triangles
+                            // (sphere.stl edge ~0.035 < dx=0.05): with 1-cell halo the triangle's
+                            // AABB covers 27 candidate cells, but the SAT test admits only ~5 of
+                            // them, so the sphere surface basically does not exist in the LBM. The
+                            // distance test (cell bounding-sphere radius dx*sqrt(3)/2) is a
+                            // necessary condition for the triangle to cut the cell — it admits every
+                            // truly-cut cell plus a small margin of near-miss cells. Over-marking is
+                            // harmless: cells that are close but not actually cut get IB flag but no
+                            // `dis` entry, so SinglePointInterpolation::treat leaves them on the
+                            // normal streaming path.
+                            // IB-mark radius: cells within dx*sqrt(3)/2 of a triangle are truly cut.
+                            // Expanded to dx*sqrt(3) so dis-computation (below) sees ~6+ triangles
+                            // per cell -> 3-8 valid link directions instead of 1.
+                            // Over-marking IB is harmless: cells with all-dis==-1 behave like
+                            // normal fluid in SinglePointInterpolation::treat.
+                            double cell_bounding_radius = dx_innerLat * 1.7320508075688772;  // dx * sqrt(3)
+                            double pt_dist = Shape::point_triangle_distance(lat_center, tri);
+                            if (pt_dist < g_diag_minDist) g_diag_minDist = pt_dist;
+                            if (pt_dist > g_diag_maxDist) g_diag_maxDist = pt_dist;
+                            if (pt_dist <= cell_bounding_radius)
+                            {
+                                ++g_diag_close;
+                                if (!same_dir) {
+                                    // Cell center is INSIDE the solid and the triangle cuts the cell ->
+                                    // solid-side surface cell, no LBM (moved to lat_sf below).
+                                    add_surf.insert(cell_in_box_code);
+                                    triFaceID_in_srf[cell_in_box_code].push_back(std::array<D_int,2>{ishape, triFace_idx});
+                                } else {
+                                    // Cell center is OUTSIDE the solid and the triangle cuts the cell ->
+                                    // immersed-boundary cell in the fluid, needs LBM + IB correction.
+                                    // Override FLUID: a previous triangle may have marked this cell
+                                    // FLUID (because it was far from that triangle), but the current
+                                    // triangle is close enough to cut it. IB must win, otherwise the
+                                    // IB shell has holes and BFS leaks into the sphere interior.
+                                    if (lat_f_iter->second.flag == TBD || lat_f_iter->second.flag == FLUID) {
+                                        lat_f_iter->second.flag = IB;
+                                    }
+                                    compute_distance(tri, cell_in_box_code, lat_center);
+                                }
 
-                                        add_surf.insert(cell_in_box_code); 
-                                        triFaceID_in_srf[cell_in_box_code].push_back(std::array<D_int,2>{ishape, triFace_idx});
-                                    } else {
-                                        lat_f.at(C_max_level).at(cell_in_box_code).flag = IB;
-                                        compute_distance(tri, cell_in_box_code, lat_center);
-                                    }
-                                    
-                                }
-                                else {
-                                    if (!same_dir) {
-                                        lat_f.at(C_max_level).at(cell_in_box_code).flag = (lat_f.at(C_max_level).at(cell_in_box_code).flag == TBD) ? FLUID : (lat_f.at(C_max_level).at(cell_in_box_code).flag);
-                                    }
-                                }
+                            }
+                            else {
+                                ++g_diag_far;
+                                // Cell is far from the CURRENT triangle — but might be close to a
+                                // different triangle in the same surface. Do NOT mark FLUID here;
+                                // leave the cell TBD so a later close triangle can still promote it
+                                // to IB. FLUID is seeded later by propagate_fluid_lattices BFS from
+                                // the gr_inner outer skin, which is the correct place to decide that
+                                // a cell is truly in the open fluid region.
                             }
                             
                         } // for k
@@ -776,6 +871,116 @@ void Lat_Manager::update_cutting_lattices()
     for (auto i_srf : add_surf) {
         lat_f.at(C_max_level).erase(i_srf);
         lat_sf.insert(make_pair(i_srf, Cell(Cell_Flag::SURFACE)));
+        // IB cell reclassified as SURFACE: drop stale dis entry to prevent
+        // treat() from accessing a cell no longer in lat_f.
+        dis.erase(i_srf);
+    }
+
+    // dis direction-count histogram
+    {
+        std::map<D_int, D_int> nlink_hist;
+        D_int n_empty = 0;  // dis entries with all -1 (should be zero)
+        D_int n_total = 0;
+        for (auto& d : dis) {
+            D_int nvalid = 0;
+            for (D_int q = 0; q < C_Q-1; ++q)
+                if (d.second[q] != -1.) ++nvalid;
+            ++nlink_hist[nvalid];
+            ++n_total;
+            if (nvalid == 0) ++n_empty;
+        }
+        std::cout << "[diag] dis direction-count histogram (N=" << n_total << " cells):" << std::endl;
+        for (auto& kv : nlink_hist)
+            std::cout << "       nlinks=" << kv.first << ": " << kv.second << " cells" << std::endl;
+        if (n_empty > 0)
+            std::cout << "       WARNING: " << n_empty << " dis entries have ZERO valid directions!" << std::endl;
+    }
+
+    // Geometric distance to sphere surface diagnostic
+    {
+        D_vec sphere_center(2.0, 5.5, 5.5);
+        D_real sphere_r = 0.5;
+        double dx_finest = dx.at(C_max_level);
+        double ib_threshold = dx_finest * 0.5 * 1.7320508075688772;  // dx*sqrt(3)/2
+        long nOutside=0, nInside=0, nIBshell=0, nFar=0;
+        double min_r = 1e30, max_r = -1;
+        for (const auto& kv : lat_f.at(C_max_level)) {
+            D_vec cc;
+            Morton_Assist::pointer_me->compute_coordinate(kv.first, C_max_level, cc.x, cc.y, cc.z);
+            cc += D_vec(dx_finest*0.5, dx_finest*0.5, dx_finest*0.5);
+            double dx_ = cc.x - sphere_center.x;
+            double dy_ = cc.y - sphere_center.y;
+            double dz_ = cc.z - sphere_center.z;
+            double r = std::sqrt(dx_*dx_ + dy_*dy_ + dz_*dz_);
+            if (r < min_r) min_r = r;
+            if (r > max_r) max_r = r;
+            double dist_to_surface = r - sphere_r;
+            if (dist_to_surface < -ib_threshold) ++nInside;
+            else if (dist_to_surface > ib_threshold) { ++nFar; ++nOutside; }
+            else { ++nIBshell; if (dist_to_surface > 0) ++nOutside; }
+        }
+        std::cout << "[diag] lat_f[2] cell distance to sphere center:"
+                  << " min_r=" << min_r << " max_r=" << max_r
+                  << " | nInside(r<R-ib) = " << nInside
+                  << " | nIBshell(|r-R|<=ib) = " << nIBshell
+                  << " | nFar(r>R+ib) = " << nFar
+                  << " | ib_threshold = " << ib_threshold
+                  << std::endl;
+
+        // Same scan over gr_inner.grid to see how many IB-shell cells fall outside
+        // lat_f[2] (i.e. are missing because they were classified OVERLAP_C2F / skipped).
+        long nGridIBshell = 0, nGridIBshellInLatF = 0, nGridIBshellOverlapC2F = 0;
+        auto& latf = lat_f.at(C_max_level);
+        auto& latc2f = lat_overlap_C2F.at(C_max_level);
+        for (const auto& kv : solidgrid_ptr->grid) {
+            D_vec cc;
+            Morton_Assist::pointer_me->compute_coordinate(kv.first, C_max_level, cc.x, cc.y, cc.z);
+            cc += D_vec(dx_finest*0.5, dx_finest*0.5, dx_finest*0.5);
+            double dx_ = cc.x - sphere_center.x;
+            double dy_ = cc.y - sphere_center.y;
+            double dz_ = cc.z - sphere_center.z;
+            double r = std::sqrt(dx_*dx_ + dy_*dy_ + dz_*dz_);
+            double dist_to_surface = r - sphere_r;
+            if (std::fabs(dist_to_surface) <= ib_threshold) {
+                ++nGridIBshell;
+                if (latf.find(kv.first) != latf.end()) ++nGridIBshellInLatF;
+                else if (latc2f.find(kv.first) != latc2f.end()) ++nGridIBshellOverlapC2F;
+            }
+        }
+        std::cout << "[diag] gr_inner IB-shell cells: total=" << nGridIBshell
+                  << " in_lat_f=" << nGridIBshellInLatF
+                  << " in_overlap_C2F=" << nGridIBshellOverlapC2F
+                  << " (missing=" << (nGridIBshell - nGridIBshellInLatF - nGridIBshellOverlapC2F)
+                  << ")" << std::endl;
+    }
+
+    // Post-classification distribution
+    {
+        std::map<int,long> hist;
+        long nFluid=0, nIB=0, nTBD=0, nSurfMoved=0;
+        for (const auto& kv : lat_f.at(C_max_level)) {
+            ++hist[kv.second.flag];
+            if (kv.second.flag == FLUID) ++nFluid;
+            else if (kv.second.flag == IB) ++nIB;
+            else if (kv.second.flag == TBD) ++nTBD;
+        }
+        nSurfMoved = add_surf.size();
+        std::cout << "[diag] after update_cutting_lattices:" << std::endl;
+        std::cout << "       lat_f[" << C_max_level << "] size = " << lat_f.at(C_max_level).size()
+                  << " (FLUID=" << nFluid << " IB=" << nIB << " TBD=" << nTBD << ")" << std::endl;
+        std::cout << "       SURFACE moved to lat_sf = " << nSurfMoved << std::endl;
+        std::cout << "       dis size (IB distance entries) = " << dis.size() << std::endl;
+        std::cout << "[diag] add_surf (inside-sphere cut cells) = " << add_surf.size()
+                  << " | nCellsTested = " << g_diag_cellsTested
+                  << " | nCellsInGrid = " << g_diag_cellsInGrid
+                  << " | nCellsInLatF = " << g_diag_cellsInLatF
+                  << " | nSameDirTrue = " << g_diag_sameDirTrue
+                  << " | nSameDirFalse = " << g_diag_sameDirFalse
+                  << " | nClose = " << g_diag_close
+                  << " | nFar = " << g_diag_far
+                  << " | minDist = " << g_diag_minDist
+                  << " | maxDist = " << g_diag_maxDist
+                  << std::endl;
     }
 }
 
@@ -786,6 +991,51 @@ void Lat_Manager::update_cutting_lattices()
  */
 void Lat_Manager::propagate_fluid_lattices()
 {
+    // Seed FLUID on TBD cells that sit on the outer skin of the refined region
+    // (i.e. adjacent to an OVERLAP_C2F cell). These cells are by construction
+    // OUTSIDE the solid — the sphere sits in the middle of gr_inner, the
+    // OVERLAP_C2F ring is the level-2/level-0 interface at the outer edge.
+    // Without these seeds, update_cutting_lattices produces no FLUID cells
+    // (its triangle-AABB band is too thin), BFS has nowhere to start, every
+    // TBD cell collapses to SOLID in update_solid_lattices, and lat_f[maxlevel]
+    // ends up empty — the sphere becomes invisible to the flow.
+    {
+        long nSeeded = 0;
+        std::vector<D_morton> toSeed;
+        for (const auto& kv : lat_f.at(C_max_level)) {
+            if (kv.second.flag != TBD) continue;
+            D_morton cur = kv.first;
+            D_morton ngbr[6] = {
+                Morton_Assist::find_x0(cur, C_max_level),
+                Morton_Assist::find_x1(cur, C_max_level),
+                Morton_Assist::find_y0(cur, C_max_level),
+                Morton_Assist::find_y1(cur, C_max_level),
+                Morton_Assist::find_z0(cur, C_max_level),
+                Morton_Assist::find_z1(cur, C_max_level)
+            };
+            for (int d = 0; d < 6; ++d) {
+                if (lat_overlap_C2F.at(C_max_level).find(ngbr[d]) != lat_overlap_C2F.at(C_max_level).end()) {
+                    toSeed.push_back(cur);
+                    break;
+                }
+            }
+        }
+        for (const auto& c : toSeed) {
+            lat_f.at(C_max_level).at(c).flag = FLUID;
+            ++nSeeded;
+        }
+        std::cout << "[diag] propagate_fluid_lattices: seeded " << nSeeded
+                  << " FLUID cells on gr_inner outer skin" << std::endl;
+
+        // Verify seeding actually wrote FLUID into the map
+        long nVerify = 0;
+        for (const auto& kv : lat_f.at(C_max_level)) {
+            if (kv.second.flag == FLUID) ++nVerify;
+        }
+        std::cout << "[diag] verify after seeding: FLUID count in lat_f["
+                  << C_max_level << "] = " << nVerify << std::endl;
+    }
+
     // Manual BFS implementation
     std::vector<D_morton> queue(lat_f.at(C_max_level).size());
     D_map_define<bool> visited;
@@ -819,14 +1069,14 @@ void Lat_Manager::propagate_fluid_lattices()
                         enqueue(ngbr_code[i_q], front, rear, queue, visited);
                     }
                 } else {
-                    bool in_lat_sf  = lat_sf.find(ngbr_code[i_q]) == lat_sf.end();
-                    bool in_lat_C2F = lat_overlap_C2F.at(C_max_level).find(ngbr_code[i_q]) == lat_overlap_C2F.at(C_max_level).end();
-                    bool in_lat_F2C = lat_overlap_F2C.at(C_max_level).find(ngbr_code[i_q]) == lat_overlap_F2C.at(C_max_level).end();
-                    
-                    if (in_lat_sf && in_lat_C2F && in_lat_F2C) {
-                        std::stringstream error;
-                        error << "[propagate_fluid_lattices] lat_sf NO NEIGHBOR!" << std::endl;
-                        log_error(error.str(), Log_function::logfile);
+                    bool not_in_lat_sf  = lat_sf.find(ngbr_code[i_q]) == lat_sf.end();
+                    bool not_in_lat_C2F = lat_overlap_C2F.at(C_max_level).find(ngbr_code[i_q]) == lat_overlap_C2F.at(C_max_level).end();
+                    bool not_in_lat_F2C = lat_overlap_F2C.at(C_max_level).find(ngbr_code[i_q]) == lat_overlap_F2C.at(C_max_level).end();
+
+                    if (not_in_lat_sf && not_in_lat_C2F && not_in_lat_F2C) {
+                        // Neighbour is outside the finest-level region (it sits at a coarser
+                        // level). This is expected for cells on the outer skin of gr_inner;
+                        // treat as fluid boundary, do not abort.
                     }
                 }
 
@@ -845,7 +1095,8 @@ void Lat_Manager::propagate_fluid_lattices()
                     D_int shape_id = i_triFace[0]; 
                     D_int triFace_id = i_triFace[1];
                     if (Shape::intersect_line_with_triangle(local_coord, ngbr_coord, 
-                         Solid_Manager::pointer_me->shape_solids.at(shape_id).triFace.at(triFace_id))) 
+                         Solid_Manager::pointer_me->shape_solids.at(shape_id).triFace.at(triFace_id),
+                         dist_to_latCenter)) 
                          {
                             if (dis.find(current_code) == dis.end()) {
                                 dis.insert(make_pair(current_code, std::array<D_real, C_Q-1>()));
@@ -861,6 +1112,21 @@ void Lat_Manager::propagate_fluid_lattices()
             }
 
         } // for i_q
+    }
+
+    // Post-BFS distribution
+    {
+        std::map<int,long> hist;
+        long nFluid=0, nIB=0, nTBD=0;
+        for (const auto& kv : lat_f.at(C_max_level)) {
+            ++hist[kv.second.flag];
+            if (kv.second.flag == FLUID) ++nFluid;
+            else if (kv.second.flag == IB) ++nIB;
+            else if (kv.second.flag == TBD) ++nTBD;
+        }
+        std::cout << "[diag] after propagate_fluid_lattices BFS:" << std::endl;
+        std::cout << "       lat_f[" << C_max_level << "] size = " << lat_f.at(C_max_level).size()
+                  << " (FLUID=" << nFluid << " IB=" << nIB << " TBD=" << nTBD << ")" << std::endl;
     }
 }
 
@@ -956,14 +1222,14 @@ void Lat_Manager::update_solid_lattices()
                         break;
                     }
                 } else {
-                    bool in_lat_sf = lat_sf.find(ngbr_code[i_dir]) == lat_sf.end();
-                    bool in_lat_C2F = lat_overlap_C2F.at(C_max_level).find(ngbr_code[i_dir]) == lat_overlap_C2F.at(C_max_level).end();
-                    bool in_lat_F2C = lat_overlap_F2C.at(C_max_level).find(ngbr_code[i_dir]) == lat_overlap_F2C.at(C_max_level).end();
-                    
-                    if (in_lat_sf && in_lat_C2F && in_lat_F2C) {
-                        std::stringstream error;
-                        error << "[update_solid_lattices] lat_sf NO NEIGHBOR!" << std::endl;
-                        log_error(error.str(), Log_function::logfile);
+                    bool not_in_lat_sf  = lat_sf.find(ngbr_code[i_dir]) == lat_sf.end();
+                    bool not_in_lat_C2F = lat_overlap_C2F.at(C_max_level).find(ngbr_code[i_dir]) == lat_overlap_C2F.at(C_max_level).end();
+                    bool not_in_lat_F2C = lat_overlap_F2C.at(C_max_level).find(ngbr_code[i_dir]) == lat_overlap_F2C.at(C_max_level).end();
+
+                    if (not_in_lat_sf && not_in_lat_C2F && not_in_lat_F2C) {
+                        // Neighbour is outside the finest-level region (coarser level).
+                        // Treat as fluid boundary so IB cells on the gr_inner skin keep their flag.
+                        fluidNgbr = true;
                     }
                 }
                 
@@ -985,21 +1251,34 @@ void Lat_Manager::update_solid_lattices()
 
 void Lat_Manager::compute_distance(Solid_Face triFace, D_morton local_code, D_vec lat_center)
 {
-    double halfbox = dx.at(C_max_level) / 2;
-	for (D_int i_q = 1; i_q < C_Q; ++i_q) 
+    // IB link goes from the IB cell center to the NEIGHBOR cell center, not to
+    // the cell face. The original code used halfbox = dx/2, which only reached
+    // the cell face and made `distance` > 1 for any wall beyond the face — the
+    // IB correction formula (feqi + fneqi + distance*fcoli) / (1 + distance)
+    // then extrapolates past the neighbour and blows up within ~40 iterations.
+    // Use the full cell pitch dx so distance is correctly normalized to
+    // [0, 1] (0 = wall at IB center, 1 = wall at neighbour center).
+    double cell_pitch = dx.at(C_max_level);
+	for (D_int i_q = 1; i_q < C_Q; ++i_q)
     {
-		D_vec ngbr_coord = lat_center + D_vec(ex[i_q]*halfbox, ey[i_q]*halfbox, ez[i_q]*halfbox);
+		D_vec ngbr_coord = lat_center + D_vec(ex[i_q]*cell_pitch, ey[i_q]*cell_pitch, ez[i_q]*cell_pitch);
         D_real dist_to_latCenter;
         if (Shape::intersect_line_with_triangle(lat_center, ngbr_coord, triFace, dist_to_latCenter)) {
-            // dis.at(local_code)[i_q] = min_of_two(dis.at(local_code)[i_q], dist_to_latCenter / Shape::two_points_length(lat_center, ngbr_coord));
+            D_real link_length = Shape::two_points_length(lat_center, ngbr_coord);
+            D_real normalized = dist_to_latCenter / link_length;
+            // Only accept intersections that fall ON the link (0 <= t <= 1).
+            // t > 1 means the wall is past the neighbour — that link does not
+            // cross the solid, so leave distance = -1 (normal streaming).
+            if (normalized < 0.0 || normalized > 1.0) continue;
             if (dis.find(local_code) == dis.end()) {
                 dis.insert(make_pair(local_code, std::array<D_real, C_Q-1>()));
                 dis.at(local_code).fill(-1.);
-                dis.at(local_code)[i_q] = dist_to_latCenter / Shape::two_points_length(lat_center, ngbr_coord);
+                dis.at(local_code)[i_q-1] = normalized;
             } else {
-                dis.at(local_code)[i_q] = 
-                    min_of_two(dis.at(local_code)[i_q], 
-                     dist_to_latCenter / Shape::two_points_length(lat_center, ngbr_coord));
+                // Overwrite -1 sentinel; keep minimum distance otherwise
+                D_real& cur = dis.at(local_code)[i_q-1];
+                if (cur == -1. || normalized < cur)
+                    cur = normalized;
             }
         }
 	}

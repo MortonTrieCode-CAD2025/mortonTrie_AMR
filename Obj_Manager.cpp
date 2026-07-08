@@ -413,10 +413,12 @@ void Obj_Manager::initial()
 	ini_shape.at(0).shape_type = geofile_stl;
 	// ini_shape.at(0).bool_moving = true;
 	ini_shape.at(0).bool_moving = false;
-	// Set solid center position for arbitrary positioning within domain
-	ini_shape.at(0).length.push_back((C_domain[0] + C_domain[3]) / 2);  // x center
-	ini_shape.at(0).length.push_back((C_domain[1] + C_domain[4]) / 2);  // y center
-	ini_shape.at(0).length.push_back((C_domain[2] + C_domain[5]) / 2);  // z center
+	// Set solid position: STL local origin (0,0,0) will be placed at
+	// C_solid_origin (defined per-namespace in Constants.h). Edit there to
+	// manually control where the solid sits inside the domain.
+	ini_shape.at(0).length.push_back(C_solid_origin[0]);  // x origin
+	ini_shape.at(0).length.push_back(C_solid_origin[1]);  // y origin
+	ini_shape.at(0).length.push_back(C_solid_origin[2]);  // z origin
 
 	// ini_shape.at(0).shape_type = circle;
 	// ini_shape.at(0).bool_moving = true;
@@ -456,11 +458,13 @@ void Obj_Manager::initial()
 	std::cout << "Grid space: " << gr_manager.gr_inner.get_dx() << std::endl;
 	std::cout << "Generation time: " << ed - st << " s." << std::endl;
 
+#if (C_MAP_TYPE == 1) || (C_MAP_TYPE == 2)
 	MapMemoryMeasurer::analyzeMapMemory(gr_manager.gr_inner.grid);
 
 	size_t diffMemory = MapMemoryMeasurer::measureByDifference(gr_manager.gr_inner.grid);
 	std::cout << "Memory measured by difference method: " << diffMemory << " bytes ("
 	<< (diffMemory / 1024.0) << " KB)\n\n";
+#endif
 
 
 	auto now = std::chrono::system_clock::now();
@@ -478,7 +482,7 @@ void Obj_Manager::initial()
 
 
 	std::ofstream amr_nodes_file;
-	amr_nodes_file.open(ss.str(), std::ios::out);
+	amr_nodes_file.open(outputPath(ss.str()), std::ios::out);
 	for (auto iter =  gr_manager.gr_inner.grid.begin(); iter != gr_manager.gr_inner.grid.end(); ++iter) {
 		amr_nodes_file << iter->first << "\n";
 	}
@@ -486,8 +490,8 @@ void Obj_Manager::initial()
 	
 
 	// Generate lattices from mesh (node = vertex)
-	// Lat_Manager::pointer_me = &lat_manager;
-	// lat_manager.voxelize();
+	Lat_Manager::pointer_me = &lat_manager;
+	lat_manager.voxelize();
 	// lat_manager.initial(); // old version
 }
 

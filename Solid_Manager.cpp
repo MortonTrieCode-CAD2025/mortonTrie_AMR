@@ -13,11 +13,8 @@
 void Solid_Manager::initial(const std::vector<Ini_Shape> &ini_shap)
 {
 	numb_solids = ini_shap.size();
-	// Initialize shape offset for unified domain positioning
-	shape_offset_x0_grid = C_domain[0];  // Use domain minimum as offset
-	shape_offset_y0_grid = C_domain[1];
-#if (C_DIMS==3)
-	shape_offset_z0_grid = C_domain[2];
+		// Solid position controlled by C_solid_origin only
+	shape_offset_z0_grid = 0;
 #endif
 	for (unsigned int i = 0; i < numb_solids; ++i)
 	{

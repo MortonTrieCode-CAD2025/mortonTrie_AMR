@@ -15,7 +15,7 @@
 class D3Q19_BC_Strategy
 {
 protected:
-    D_map_define<D_Phy_DDF>* f_ptr;
+    D_DDFSlot* f_ptr;
     _s_DDF* df_ptr;
     D_map_define<D_Phy_Rho>* density_ptr;
     D_map_define<D_uvw>* velocity_ptr;
@@ -57,8 +57,8 @@ protected:
 //  the reserved directions pointing to existing neighbor lattices
 #if (C_DIMS == 3)
  #if (C_Q == 19)
-    static constexpr std::array<std::array<int, 14>,C_Q-1>
-    // std::array<std::array<int, 14>,C_Q-1>
+    static constexpr std::array<std::array<int, 14>,26>
+    // std::array<std::array<int, 14>,26>  (outer = 6 faces + 12 edges + 8 corners = 26, NOT C_Q-1=18)
      bdry_dirs = {{{0,1,3,4,5,6,7,9,11,13,15,16,17,18}, //FACE_WEST[14]
                     {0,2,3,4,5,6,8,10,12,14,15,16,17,18}, //FACE_EAST[14]
                      {0,1,2,3,5,6,7,10,11,12,13,14,15,17}, //FACE_SOUTH[14]

@@ -2,10 +2,10 @@
  * @file outflow.h
  * @brief simple exterpolation
  * @date 2023-07-24
+ * @note Hard-coded D3Q19 inward-pointing direction set; gated to D3Q19 builds only.
  */
-#define BC_NO_GHOST
-#ifndef BC_NO_GHOST
 #include "BC/Outflow.hpp"
+#if (C_Q == 19)
 #include "Lat_Manager.hpp"
 #include "Morton_Assist.h"
 

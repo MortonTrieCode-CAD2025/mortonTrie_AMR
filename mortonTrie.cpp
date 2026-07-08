@@ -1,6 +1,8 @@
 #include "header/mortonTrie.hpp"
 #include "header/Morton_Assist.h"
 #include <iostream>
+#include <functional>
+#include <unordered_map>
 
 #define LOOP_METHOD_FINDFIRST1
 
@@ -220,57 +222,114 @@ void MortonTrie::update_halfway(const D_morton morton, const uint8_t level, cons
 
 }
 
-// Bitmap-based O(1) existence query implementation
-bool MortonTrie::exists(const D_morton& morton, const uint8_t level) const {
-    uint32_t bg_index = extract_background_index(morton);
-    uint32_t ref_index = extract_refinement_index(morton, level);
+// Bitmap-based O(1) existence query implementation moved to header file for inlining
 
-    if (bg_index >= BACKGROUND_GRID_SIZE || ref_index >= BITMAP_BITS_PER_CELL) {
-        return false; // Out of bounds
-    }
-
-    return existence_bitmaps[bg_index][ref_index];
-}
-
-uint32_t MortonTrie::extract_background_index(const D_morton& morton) const {
-    // For simplicity, use a basic approach: extract the higher bits and convert to index
-    // Background bits start at bit position: refine_level * DIM
-    uint32_t bg_bits_start = refine_level * DIM;
-
-    // Extract the background portion as a simple integer
-    uint64_t bg_portion = 0;
-    for (uint32_t i = bg_bits_start; i < BIT; ++i) {
-        if (morton[i]) {
-            bg_portion |= (1ULL << (i - bg_bits_start));
-        }
-    }
-
-    // For now, use modulo to ensure we stay within bounds
-    // This is a simplified approach - in production, proper Morton decoding should be used
-    return static_cast<uint32_t>(bg_portion % BACKGROUND_GRID_SIZE);
-}
+// Background index extraction is no longer needed with Morton-ordered bitmaps
+// Morton code is used directly as array index
 
 uint32_t MortonTrie::extract_refinement_index(const D_morton& morton, const uint8_t level) const {
     // Extract refinement field from lower bits
-    uint32_t ref_index = 0;
+    // The refinement field is the lower (level * DIM) bits of the Morton code
     uint32_t bits_to_extract = level * DIM;
 
-    // Extract the lower bits that represent the refinement path
-    for (uint32_t i = 0; i < bits_to_extract; ++i) {
-        if (morton[i]) {
-            ref_index |= (1U << i);
-        }
-    }
+    // Convert bitset to uint64_t and mask to get lower bits
+    uint64_t morton_val = morton.to_ullong();
+    uint64_t mask = (1ULL << bits_to_extract) - 1;
 
-    return ref_index;
+    return static_cast<uint32_t>(morton_val & mask);
 }
 
-void MortonTrie::set_existence_bit(const D_morton& morton, const uint8_t level) {
-    uint32_t bg_index = extract_background_index(morton);
-    uint32_t ref_index = extract_refinement_index(morton, level);
+// set_existence_bit() moved to header file for inlining
 
-    if (bg_index < BACKGROUND_GRID_SIZE && ref_index < BITMAP_BITS_PER_CELL) {
-        existence_bitmaps[bg_index][ref_index] = true;
+// Morton-ordered bitmap implementation uses direct indexing
+
+// Tree traversal-based O(depth) existence query (for ablation study)
+// This method checks existence by traversing the trie tree structure
+// Time complexity: O(depth), where depth = search_depth - 1
+bool MortonTrie::exists_tree_traversal(const D_morton& morton, const uint8_t level) const {
+    TrieNode* node = root;
+
+    uint8_t search_depth = depth - refine_level + level;
+
+    // Traverse the tree to search_depth - 1
+    for (uint8_t i_depth = 0; i_depth < search_depth - 1; ++i_depth) {
+        uint8_t start_pos = (depth - i_depth) * DIM;
+        uint8_t index = EXTRACT_MORTON_CONVERT_INDEX(morton, start_pos);
+
+        // If children don't exist at this level, the node doesn't exist
+        if (!node->children) {
+            return false;
+        }
+
+        node = &node->children[index];
     }
+
+    // Check if data exists at the final level
+    if (!node->data) {
+        return false;
+    }
+
+    // Check if the specific index has been initialized
+    // Note: This is a simplified check. In practice, you might need additional
+    // bookkeeping to track which indices in the data array are actually in use
+    uint8_t final_index = EXTRACT_MORTON_CONVERT_INDEX(morton, DIM);
+
+    // For this implementation, we assume if data array exists, the element exists
+    // This matches the behavior of the insert/search methods
+    return true;
+}
+
+// Morton-ordered bitmap array requires no additional initialization
+
+// Get bitmap memory usage in bytes
+size_t MortonTrie::get_bitmap_memory_usage() const {
+    // Each CellBitmap is a std::bitset<BITMAP_BITS_PER_CELL>
+    // Morton-ordered array: (MAX_BG_MORTON + 1) positions, includes empty slots
+    // Memory = (MAX_BG_MORTON + 1) * sizeof(CellBitmap)
+    size_t bytes = existence_bitmaps.size() * sizeof(CellBitmap);
+
+    // Add vector overhead
+    bytes += sizeof(std::vector<CellBitmap>);
+
+    return bytes;
+}
+
+// Morton-ordered bitmap memory usage
+
+// Get tree structure memory usage in bytes (approximate)
+size_t MortonTrie::get_tree_memory_usage() const {
+    size_t total_memory = sizeof(MortonTrie);
+
+    // Count root node
+    total_memory += sizeof(TrieNode);
+
+    // Recursively count allocated nodes only
+    std::function<void(TrieNode*)> count_nodes = [&](TrieNode* node) {
+        if (!node) return;
+
+        // Count children array if allocated
+        if (node->children) {
+            total_memory += sizeof(TrieNode) * BRANCH;
+            // Recursively count each child
+            for (uint8_t i = 0; i < BRANCH; ++i) {
+                count_nodes(&node->children[i]);
+            }
+        }
+
+        // Count data array if allocated
+        if (node->data) {
+            total_memory += sizeof(double) * BRANCH;
+            #ifdef ABPattern
+            total_memory += sizeof(double) * BRANCH;
+            #endif
+        }
+    };
+
+    count_nodes(root);
+
+    // Add search path stack
+    total_memory += sizeof(std::vector<TrieNode*>) + sizeof(TrieNode*) * depth;
+
+    return total_memory;
 }
 

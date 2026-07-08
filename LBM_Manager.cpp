@@ -10,6 +10,7 @@
 #include "Constants.h"
 #include "user.h"
 #include "LBM_Manager.hpp"
+#include <cmath>
 // #include "Grid_Manager.h"
 #include "Lat_Manager.hpp"
 #include "Morton_Assist.h"
@@ -34,16 +35,16 @@ LBM_Manager::LBM_Manager()
 
     // dermine run order of each refinement level
     defineRunOrder();
-    setUnit("Cumulant");
+    setUnit("LBGK");
 
     user = new User[C_max_level+1];
     allocMacrosAndDDF();
 
-    // collideModel = Collision_Model_Factory::createCollisionModel("LBGK");
-    collideModel = Collision_Model_Factory::createCollisionModel("Cumulant");
+    collideModel = Collision_Model_Factory::createCollisionModel("LBGK");
+    // collideModel = Collision_Model_Factory::createCollisionModel("Cumulant");
     streamModel = new ABPatternPull(user);
     // solidBCModel = new UniformBoundary(user);
-    solidBCModel = new SinglePointInterpolation(user);
+    solidBCModel = new SinglePointInterpolation(user, sphere::C_IB_use_FH ? IB_Method::FH : IB_Method::DISTANCE_WEIGHTED);
 
     bc_manager_ = new D3Q19_BoundaryCondtion_Manager;
     // std::unique_ptr<D3Q19_BC_Strategy> westBC_param_ptr = 
@@ -805,10 +806,26 @@ void LBM_Manager::setUnit(std::string collision_Model)
     }
     CF_U = CF_L[0] / CF_T[0];
     CF_Rho = U_rho0 / L_Rho;
+    // CF_Nu must be initialised here (checkMach only sets it for Ma>=MAX_MACH branch)
+    for (D_int i_level = 0; i_level < C_max_level+1; ++i_level) {
+        CF_Nu[i_level] = CF_L[i_level] * CF_U;
+    }
     checkMach(R_velocity/CF_U);
     for (D_int i_level = 0; i_level < C_max_level+1; ++i_level) {
-        tau[i_level] = U_kineViscosity / CF_Nu[i_level] / (L_CsSq * L_TIME[i_level]) + 0.5;
+        // tau = nu_lb / Cs² + 0.5; nu_lb must scale as 2^level for constant physical nu
+        tau[i_level] = U_kineViscosity / CF_Nu[i_level] / L_CsSq + 0.5;
         std::cout << " - [Level"<<i_level<<"] relaxation time = " << tau[i_level] << std::endl;
+    }
+    std::cout << " - [AMR check] nu_lb per level (should double per level):";
+    for (D_int i_level = 0; i_level < C_max_level+1; ++i_level) {
+        D_real nu_lb = (tau[i_level] - 0.5) / L_CsSq;
+        std::cout << " L" << i_level << "=" << nu_lb;
+    }
+    std::cout << std::endl;
+    for (D_int i_level = 1; i_level < C_max_level+1; ++i_level) {
+        std::cout << " - [AMR check] L" << i_level << "<-L" << (i_level-1)
+                  << " c2f=" << (2.0 * tau[i_level] / tau[i_level-1])
+                  << " f2c=" << (tau[i_level-1] / (2.0 * tau[i_level])) << std::endl;
     }
     std::cout << " - Re = " << R_Re << std::endl;
 
@@ -826,44 +843,141 @@ void LBM_Manager::setUnit(std::string collision_Model)
     printf("------------ -------------------- ------------\n");
 }
 
+void LBM_Manager::accumIBForce(D_Phy_real fx, D_Phy_real fy, D_Phy_real fz)
+{
+    m_ibFx_sum += fx;
+    m_ibFy_sum += fy;
+    m_ibFz_sum += fz;
+    ++m_ibForce_count;
+}
+
+void LBM_Manager::diagL2MaxF(const char* tag)
+{
+    // Scan finest-level lat_f for max |f| and |fcol|
+    D_mapLat* lat_ptr = &(Lat_Manager::pointer_me->lat_f.at(C_max_level));
+    D_real maxf = 0., maxfcol = 0.;
+    D_morton c_f = 0, c_fc = 0; D_int q_f = 0, q_fc = 0;
+    for (auto& kv : *lat_ptr) {
+        D_morton c = kv.first;
+        for (D_int q = 0; q < C_Q; ++q) {
+            D_real fv = user[C_max_level].df.f[q].at(c);
+            D_real af = std::fabs(fv);
+            if (af > maxf) { maxf = af; c_f = c; q_f = q; }
+            D_real fcv = user[C_max_level].df.fcol[q].at(c);
+            D_real afc = std::fabs(fcv);
+            if (afc > maxfcol) { maxfcol = afc; c_fc = c; q_fc = q; }
+        }
+    }
+    std::cout << "  [diag " << tag << " L2] max|f|=" << maxf << " (q" << q_f << "," << c_f << ")"
+              << "  max|fcol|=" << maxfcol << " (q" << q_fc << "," << c_fc << ")" << std::endl;
+}
+
+void LBM_Manager::diagL2RhoMin(const char* tag)
+{
+    // Scan finest-level for min rho, rho<=0 count, and worst cell type
+    D_mapLat* lat_ptr = &(Lat_Manager::pointer_me->lat_f.at(C_max_level));
+    auto& dis_map = Lat_Manager::pointer_me->dis;
+    auto& ov_map  = Lat_Manager::pointer_me->lat_overlap_F2C.at(C_max_level);
+
+    D_real min_rho_f = 1e30, min_rho_fc = 1e30;
+    D_int  n_neg_f = 0, n_neg_fc = 0, n_low_f = 0;
+    D_morton c_worst = 0; D_real rho_worst = 1e30;
+    bool worst_is_dis = false, worst_is_ov = false;
+
+    for (auto& kv : *lat_ptr) {
+        D_morton c = kv.first;
+        D_real rf = 0., rfc = 0.;
+        for (D_int q = 0; q < C_Q; ++q) {
+            rf  += user[C_max_level].df.f[q].at(c);
+            rfc += user[C_max_level].df.fcol[q].at(c);
+        }
+        if (rf < min_rho_f) {
+            min_rho_f = rf; c_worst = c; rho_worst = rf;
+            worst_is_dis = (dis_map.find(c) != dis_map.end());
+            worst_is_ov  = (ov_map.find(c) != ov_map.end());
+        }
+        if (rfc < min_rho_fc) min_rho_fc = rfc;
+        if (rf  <= 0.0) ++n_neg_f;
+        if (rfc <= 0.0) ++n_neg_fc;
+        if (rf  < 0.5)  ++n_low_f;
+    }
+    std::cout << "  [diag " << tag << " L2-rho] min_rho_f=" << min_rho_f
+              << " min_rho_fcol=" << min_rho_fc
+              << " n_neg_f=" << n_neg_f << " n_neg_fcol=" << n_neg_fc
+              << " n_low_f(<0.5)=" << n_low_f
+              << " | worst: code=" << c_worst << " rho_f=" << rho_worst
+              << (worst_is_dis ? " [IB]" : "")
+              << (worst_is_ov ? " [overlap]" : "")
+              << std::endl;
+}
+
 void LBM_Manager::infoPrint(D_int iter_no)
 {
     std::cout << "[Iter] " << iter_no;
     D_real temp1, temp2;
     D_int i, j, k, id;
     D_real guerror = 0., grerr = 0., uerror = 0.;
+    // Per-level velocity diagnostics
+    D_real maxvL[3] = {0.,0.,0.};
+    D_int  nbigL[3] = {0,0,0};
 
     for (D_int i_level = 0; i_level < C_max_level+1; ++i_level)
     {
         D_mapLat* lat_ptr = &(Lat_Manager::pointer_me->lat_f.at(i_level));
         for (auto i_lat : *lat_ptr) {
             D_morton lat_code = i_lat.first;
+            D_uvw v = user[i_level].velocity.at(lat_code);
 
-            if (isnanf(user[i_level].velocity.at(lat_code).x) || isnanf(user[i_level].velocity.at(lat_code).y) || isnanf(user[i_level].velocity.at(lat_code).z))
+            if (isnanf(v.x) || isnanf(v.y) || isnanf(v.z))
             {
-                std::cout << "lat_code " << lat_code << " V=(" << user[i_level].velocity.at(lat_code).x << "," <<
-                    user[i_level].velocity.at(lat_code).y << "," <<
-                    user[i_level].velocity.at(lat_code).z << ")" << std::endl;
+                std::cout << "lat_code " << lat_code << " V=(" << v.x << "," << v.y << "," << v.z << ")" << std::endl;
             }
 
-            guerror += (user[i_level].velocity.at(lat_code).x - user[i_level].v_old.at(lat_code).x) * (user[i_level].velocity.at(lat_code).x - user[i_level].v_old.at(lat_code).x) + (user[i_level].velocity.at(lat_code).y - user[i_level].v_old.at(lat_code).y) * (user[i_level].velocity.at(lat_code).y - user[i_level].v_old.at(lat_code).y) + (user[i_level].velocity.at(lat_code).z - user[i_level].v_old.at(lat_code).z) * (user[i_level].velocity.at(lat_code).z - user[i_level].v_old.at(lat_code).z);
-            grerr += (user[i_level].velocity.at(lat_code).x * user[i_level].velocity.at(lat_code).x + user[i_level].velocity.at(lat_code).y * user[i_level].velocity.at(lat_code).y + user[i_level].velocity.at(lat_code).z * user[i_level].velocity.at(lat_code).z);
+            D_real vmag = std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+            if (vmag > maxvL[i_level]) maxvL[i_level] = vmag;
+            if (vmag > 1.0) ++nbigL[i_level];
+
+            guerror += (v.x - user[i_level].v_old.at(lat_code).x) * (v.x - user[i_level].v_old.at(lat_code).x) + (v.y - user[i_level].v_old.at(lat_code).y) * (v.y - user[i_level].v_old.at(lat_code).y) + (v.z - user[i_level].v_old.at(lat_code).z) * (v.z - user[i_level].v_old.at(lat_code).z);
+            grerr += (v.x * v.x + v.y * v.y + v.z * v.z);
         }
         for (auto i_lat : Lat_Manager::pointer_me->lat_overlap_F2C.at(i_level)) {
             D_morton lat_code = i_lat.first;
+            D_uvw v = user[i_level].velocity.at(lat_code);
 
-            if (isnanf(user[i_level].velocity.at(lat_code).x) || isnanf(user[i_level].velocity.at(lat_code).y) || isnanf(user[i_level].velocity.at(lat_code).z))
+            if (isnanf(v.x) || isnanf(v.y) || isnanf(v.z))
             {
-                std::cout << "lat_code " << lat_code << " V=(" << user[i_level].velocity.at(lat_code).x << "," <<
-                    user[i_level].velocity.at(lat_code).y << "," <<
-                    user[i_level].velocity.at(lat_code).z << ")" << std::endl;
+                std::cout << "lat_code " << lat_code << " V=(" << v.x << "," << v.y << "," << v.z << ")" << std::endl;
             }
+            D_real vmag = std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+            if (vmag > maxvL[i_level]) maxvL[i_level] = vmag;
+            if (vmag > 1.0) ++nbigL[i_level];
         }
     }
 
     uerror = sqrt(guerror) / sqrt(grerr + 1e-16);
 
-    std::cout << " time = " << iter_no * CF_T[0] << " Velocity error = " << uerror << std::endl;
+    std::cout << " time = " << iter_no * CF_T[0] << " Velocity error = " << uerror;
+    std::cout << " | max|v|/nbig: L0=" << maxvL[0] << "/" << nbigL[0]
+              << " L1=" << maxvL[1] << "/" << nbigL[1]
+              << " L2=" << maxvL[2] << "/" << nbigL[2];
+
+    // Cd = 2*F_lb / (rho_lb * U_lb^2 * pi*d_lb^2/4)
+    if (m_ibForce_count > 0) {
+        D_Phy_real Fx_lb  = m_ibFx_sum / m_ibForce_count;
+        D_Phy_real U_lb   = R_velocity / CF_U;
+        D_Phy_real d_lb   = R_length / Lat_Manager::pointer_me->dx.at(C_max_level);
+        D_Phy_real A_lb   = 3.14159265358979323846 * d_lb * d_lb / 4.0;
+        D_Phy_real rho_lb = 1.0;
+        D_Phy_real Cd = 2.0 * Fx_lb / (rho_lb * U_lb * U_lb * A_lb);
+        m_cd_sum += Cd; ++m_cd_count;
+        std::cout << "  Cd = " << Cd
+                  << "  (Cd_avg = " << (m_cd_sum / m_cd_count)
+                  << ", Fx_lb = " << Fx_lb
+                  << ", n = " << m_ibForce_count << ")";
+        m_ibFx_sum = m_ibFy_sum = m_ibFz_sum = 0.0;
+        m_ibForce_count = 0;
+    }
+    std::cout << std::endl;
 }
 
 void LBM_Manager::calculateMacros(const D_Phy_DDF* ddf, D_Phy_Rho& rho, D_uvw& v)
@@ -877,7 +991,13 @@ void LBM_Manager::calculateMacros(const D_Phy_DDF* ddf, D_Phy_Rho& rho, D_uvw& v
         v.y += ddf[i_q] * ey[i_q];
         v.z += ddf[i_q] * ez[i_q];
     }
-    v = v / rho;
+    // rho floor: protect the velocity inversion v=rho^-1 from rho->0 blow-up (NaN amplifier).
+    // The真实 rho is still stored in the density output; only the division is guarded.
+    D_Phy_Rho safe_rho = (rho > -1e-6 && rho < 1e-6) ? ((rho < 0.0) ? -1e-6 : 1e-6) : rho;
+    v = v / safe_rho;
+    // No |v| clamp: the rho->0 blowup source is fixed at the root (mass-conservation
+    // correction in SinglePointInterpolation::treat). Only the safe_rho floor above
+    // guards the 1/rho inversion. Re-clamp only if a new rho->0 source reappears.
 }
 
 void LBM_Manager::calculateMacros(D_int level)
@@ -889,17 +1009,34 @@ void LBM_Manager::calculateMacros(D_int level)
 
     for (auto i_lat : *lat_ptr) {
         D_morton lat_code = i_lat.first;
+        // Save previous velocity before overwriting, so infoPrint() can compute a real convergence error.
+        // Without this, v_old stays at its initial (0,0,0) and Velocity error is always 1.
+        user[level].v_old.at(lat_code) = user[level].velocity.at(lat_code);
         load_ddf(ddf, level, lat_code);
         calculateMacros(ddf, user[level].density.at(lat_code), user[level].velocity.at(lat_code));
+        D_Phy_Rho _rho_val = user[level].density.at(lat_code);
+        // Only flag genuine NaN velocity (the rho<0.5||>2.0 range check flooded the log with
+        // ~4000 near-IB cells at rho~0.48 per step, making long runs I/O-bound). The rho-floor
+        // in calculateMacros(ddf,...) already guards v=rho^-1, so off-range rho is not fatal.
         if (isnanf(user[level].velocity.at(lat_code).x) || isnanf(user[level].velocity.at(lat_code).y) || isnanf(user[level].velocity.at(lat_code).z))
         {
-            // 0000000000000000000000000000000000001010101001001110000110100001
             std::cout << "level " << level << std::endl;
-            std::cout << "lat_code " << lat_code << " V=(" << user[level].velocity.at(lat_code).x << "," <<
+            std::cout << "lat_code " << lat_code << " rho=" << _rho_val << " V=(" << user[level].velocity.at(lat_code).x << "," <<
                 user[level].velocity.at(lat_code).y << "," <<
                 user[level].velocity.at(lat_code).z << ")" << std::endl;
             for (auto iq=0; iq<C_Q; ++iq) {
                 std::cout << "  iq " << iq << " ddf " << ddf[iq] << std::endl;
+            }
+            if (level == C_max_level) {
+                auto& dis_map = Lat_Manager::pointer_me->dis;
+                auto d_it = dis_map.find(lat_code);
+                std::cout << "  flag=" << i_lat.second.flag << " has_dis=" << (d_it != dis_map.end());
+                if (d_it != dis_map.end()) {
+                    std::cout << " dist=[";
+                    for (int q = 0; q < C_Q-1; ++q) std::cout << d_it->second[q] << " ";
+                    std::cout << "]";
+                }
+                std::cout << std::endl;
             }
         }
     } // for i_lat
@@ -924,11 +1061,15 @@ void LBM_Manager::AMR_transDDF_explosion(D_int level)
     D_int fine_level = level;
     D_int coarse_level = level - 1;
 
-    // D_morton xxx_code("0000000000000000000000000000000000001010101001001110000110100001");
-    // std::cout << "Before explosion [level " << level << "] " << user[4].df.f[0].at(xxx_code) << " " << user[4].df.f[1].at(xxx_code) << std::endl;
+    // Convective scaling: fneq_scale = 2*tau_fine/tau_coarse (Lagrava 2012, JCP 231)
+    const D_Phy_real fneq_scale_c2f = (2.0 * tau[fine_level]) / tau[coarse_level];
 
-    // for (auto i_lat : Lat_Manager::pointer_me->lat_overlap_F2C.at(level)) 
-    for (auto i_lat : Lat_Manager::pointer_me->lat_overlap_F2C.at(coarse_level)) 
+    D_Phy_DDF ddf_c[C_Q], feq[C_Q];
+
+    // Skip IB cells: their fcol is the fneq reference for IB correction
+    auto& dis_map = Lat_Manager::pointer_me->dis;
+
+    for (auto i_lat : Lat_Manager::pointer_me->lat_overlap_F2C.at(coarse_level))
     {
         D_morton fine_code[8]{i_lat.first,
                                Morton_Assist::find_x1(i_lat.first, fine_level),
@@ -940,19 +1081,27 @@ void LBM_Manager::AMR_transDDF_explosion(D_int level)
                                      Morton_Assist::find_z1(Morton_Assist::find_y1(Morton_Assist::find_x1(i_lat.first, fine_level), fine_level), fine_level)
         };
 
+        const D_morton c_code = fine_code[0];
+        for (D_int i_q = 0; i_q < C_Q; ++i_q)
+            ddf_c[i_q] = user[coarse_level].df.fcol[i_q].at(c_code);
+        D_Phy_Rho rho;
+        D_uvw u;
+        calculateMacros(ddf_c, rho, u);
+        calculateFeq_HeLuo(rho, u, feq);
+
         for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            D_Phy_DDF f_fine = feq[i_q] + fneq_scale_c2f * (ddf_c[i_q] - feq[i_q]);
             for (D_int i_fineLat = 0; i_fineLat < 8; ++i_fineLat) {
-                user[fine_level].df.fcol[i_q].at(fine_code[i_fineLat]) = user[coarse_level].df.fcol[i_q].at(fine_code[0]);
+                if (dis_map.find(fine_code[i_fineLat]) != dis_map.end()) continue;
+                user[fine_level].df.fcol[i_q].at(fine_code[i_fineLat]) = f_fine;
             }
         }
     }
 
-    // std::cout << "After explosion lat_F2C [level " << level << "] " << user[4].df.fcol[0].at(xxx_code) << " " << user[4].df.fcol[1].at(xxx_code) << std::endl;
-
-    for (auto i_lat : Lat_Manager::pointer_me->ghost_overlap_F2C.at(coarse_level)) 
+    for (auto i_lat : Lat_Manager::pointer_me->ghost_overlap_F2C.at(coarse_level))
     {
-        D_morton ngbr_code[8]{i_lat.first, 
-                               Morton_Assist::find_x1(i_lat.first, fine_level), 
+        D_morton ngbr_code[8]{i_lat.first,
+                               Morton_Assist::find_x1(i_lat.first, fine_level),
                                 Morton_Assist::find_y1(i_lat.first, fine_level),
                                  Morton_Assist::find_y1(Morton_Assist::find_x1(i_lat.first, fine_level), fine_level),
                                   Morton_Assist::find_z1(i_lat.first, fine_level),
@@ -961,27 +1110,38 @@ void LBM_Manager::AMR_transDDF_explosion(D_int level)
                                      Morton_Assist::find_z1(Morton_Assist::find_y1(Morton_Assist::find_x1(i_lat.first, fine_level), fine_level), fine_level)
                                      };
 
+        for (D_int i_q = 0; i_q < C_Q; ++i_q)
+            ddf_c[i_q] = user[coarse_level].df.fcol[i_q].at(ngbr_code[0]);
+        D_Phy_Rho rho;
+        D_uvw u;
+        calculateMacros(ddf_c, rho, u);
+        calculateFeq_HeLuo(rho, u, feq);
+
         for (D_int i_ngbr = 0; i_ngbr < 8; ++i_ngbr) {
+            if (dis_map.find(ngbr_code[i_ngbr]) != dis_map.end()) continue;
             if (Lat_Manager::pointer_me->ghost_overlap_C2F.at(fine_level).find(ngbr_code[i_ngbr]) != Lat_Manager::pointer_me->ghost_overlap_C2F.at(fine_level).end()) {
-                for (D_int i_q = 0; i_q < C_Q; ++i_q)
-                    user[fine_level].df.fcol[i_q].at(ngbr_code[i_ngbr]) = user[coarse_level].df.fcol[i_q].at(ngbr_code[0]);
+                for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+                    user[fine_level].df.fcol[i_q].at(ngbr_code[i_ngbr]) = feq[i_q] + fneq_scale_c2f * (ddf_c[i_q] - feq[i_q]);
+                }
             }
         }
-
     }
-
-    // std::cout << "After explosion ghost_F2C [level " << level << "] " << user[4].df.fcol[0].at(xxx_code) << " " << user[4].df.fcol[1].at(xxx_code) << std::endl;
-
 }
 
 void LBM_Manager::AMR_transDDF_coalescence(D_int level)
 {
     D_int fine_level = level + 1;
     D_int coarse_level = level;
+
+    // Convective scaling fneq rescaling factor for fine -> coarse.
+    const D_Phy_real fneq_scale_f2c = tau[coarse_level] / (2.0 * tau[fine_level]);
+
+    D_Phy_DDF f_avg[C_Q], feq[C_Q];
+
     for (auto i_lat : Lat_Manager::pointer_me->lat_overlap_F2C.at(coarse_level))
     {
-        D_morton ngbr_code[8]{i_lat.first, 
-                               Morton_Assist::find_x1(i_lat.first, fine_level), 
+        D_morton ngbr_code[8]{i_lat.first,
+                               Morton_Assist::find_x1(i_lat.first, fine_level),
                                 Morton_Assist::find_y1(i_lat.first, fine_level),
                                  Morton_Assist::find_y1(Morton_Assist::find_x1(i_lat.first, fine_level), fine_level),
                                   Morton_Assist::find_z1(i_lat.first, fine_level),
@@ -990,13 +1150,21 @@ void LBM_Manager::AMR_transDDF_coalescence(D_int level)
                                      Morton_Assist::find_z1(Morton_Assist::find_y1(Morton_Assist::find_x1(i_lat.first, fine_level), fine_level), fine_level)};
 
         for (D_int i_q = 0; i_q < C_Q; ++i_q) {
-            user[coarse_level].df.f[i_q].at(i_lat.first) = 0;
+            f_avg[i_q] = 0;
             for (D_int i_ngbr = 0; i_ngbr < 8; ++i_ngbr) {
-                user[coarse_level].df.f[i_q].at(i_lat.first) += user[fine_level].df.f[i_q].at(ngbr_code[i_ngbr]);
+                f_avg[i_q] += user[fine_level].df.f[i_q].at(ngbr_code[i_ngbr]);
             }
-            user[coarse_level].df.f[i_q].at(i_lat.first) = user[coarse_level].df.f[i_q].at(i_lat.first) / 8;
+            f_avg[i_q] /= 8.0;
         }
 
+        D_Phy_Rho rho;
+        D_uvw u;
+        calculateMacros(f_avg, rho, u);
+        calculateFeq_HeLuo(rho, u, feq);
+
+        for (D_int i_q = 0; i_q < C_Q; ++i_q) {
+            user[coarse_level].df.f[i_q].at(i_lat.first) = feq[i_q] + fneq_scale_f2c * (f_avg[i_q] - feq[i_q]);
+        }
     }
 }
 

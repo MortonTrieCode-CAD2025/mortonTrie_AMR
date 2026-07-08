@@ -13,7 +13,7 @@
 #ifdef BC_NO_GHOST
 #if (C_DIMS == 3)
  #if (C_Q == 19)
-constexpr std::array<std::array<int, 14>,C_Q-1> D3Q19_BC_Strategy::bdry_dirs;
+constexpr std::array<std::array<int, 14>,26> D3Q19_BC_Strategy::bdry_dirs;
  #elif (C_Q == 27)
 constexpr std::array<std::array<int, 18>,C_Q-1> D3Q19_BC_Strategy::bdry_dirs;
  #endif

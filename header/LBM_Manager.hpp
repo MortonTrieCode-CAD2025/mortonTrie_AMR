@@ -103,8 +103,17 @@ private:
     std::array<uint, C_max_level+1> run_col_times{0,0,0};
     std::array<uint, C_max_level+1> run_stm_times{0,0,0};
 
+    // IB force via momentum-exchange; Cd = 2*F_lb/(rho_lb*U_lb^2*pi*d_lb^2/4)
+    D_Phy_real m_ibFx_sum{0}, m_ibFy_sum{0}, m_ibFz_sum{0};
+    D_int m_ibForce_count{0};
+    D_Phy_real m_cd_sum{0};
+    D_int m_cd_count{0};
+    void accumIBForce(D_Phy_real fx, D_Phy_real fy, D_Phy_real fz);
+
 public:
     LBM_Manager();
     static LBM_Manager* pointer_me;
     void fluidSimulate();
+    void diagL2MaxF(const char* tag);
+    void diagL2RhoMin(const char* tag);
 };

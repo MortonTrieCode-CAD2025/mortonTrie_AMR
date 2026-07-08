@@ -51,7 +51,15 @@ void ABPatternPull::stream(D_int level)
         f_ptr->f[0].at(lat_code) = f_ptr->fcol[0].at(lat_code);
         for (D_int i_q = 1; i_q < C_Q; ++i_q) {
             D_morton neighbor_code = Morton_Assist::find_neighbor(lat_code, level, ex[i_q], ey[i_q], ez[i_q]);
-            f_ptr->f[i_q].at(lat_code) = f_ptr->fcol[i_q].at(neighbor_code);
+            // Neighbor may be a SURFACE/SOLID cell (in lat_sf, not in lat_f) when
+            // the current cell is an IB cell on the sphere surface. fcol only has
+            // entries for lat_f / lat_overlap_C2F cells, so .at() would throw.
+            // Skip the pull — SinglePointInterpolation::treat will overwrite
+            // f[i_q][lat_code] for directions that cross the solid (distance != -1);
+            // directions that don't cross keep the previous f value (harmless).
+            auto fcol_it = f_ptr->fcol[i_q].find(neighbor_code);
+            if (fcol_it == f_ptr->fcol[i_q].end()) continue;
+            f_ptr->f[i_q].at(lat_code) = fcol_it->second;
         }
     }
 
@@ -60,7 +68,9 @@ void ABPatternPull::stream(D_int level)
         f_ptr->f[0].at(lat_code) = f_ptr->fcol[0].at(lat_code);
         for (D_int i_q = 1; i_q < C_Q; ++i_q) {
             D_morton neighbor_code = Morton_Assist::find_neighbor(lat_code, level, ex[i_q], ey[i_q], ez[i_q]);
-            f_ptr->f[i_q].at(lat_code) = f_ptr->fcol[i_q].at(neighbor_code);
+            auto fcol_it = f_ptr->fcol[i_q].find(neighbor_code);
+            if (fcol_it == f_ptr->fcol[i_q].end()) continue;
+            f_ptr->f[i_q].at(lat_code) = fcol_it->second;
         }
     }
 }

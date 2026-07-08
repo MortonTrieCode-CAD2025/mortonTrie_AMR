@@ -175,7 +175,7 @@ public:
 base_point-> 1/_______2/   
      */
 
-    Cell(const int& flag/*, const D_uint& index*/)
+    Cell(const int& flag = 0/*, const D_uint& index*/)
         : flag(flag)/*, index(index) */
     {}
 } Cell;

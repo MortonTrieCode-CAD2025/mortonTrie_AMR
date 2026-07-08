@@ -10,6 +10,15 @@
 #include "Lat_Manager.hpp"
 #include "lbm_kernel/les.hpp"
 
+// rho floor: prevent 1/rho & 1/rho^2 super-exponential blow-up when rho->0.
+// bwd_cum_trans _b ~ u^6/rho^2 amplifies a local rho->0 into f×1e30/step (the NaN amplifier
+// identified 2026-06-24). Clamp |rho|>=RHO_FLOOR so cumulants stay bounded; the root cause
+// (who pushes rho->0) then surfaces as a bounded rho-anomaly instead of an opaque NaN.
+#ifndef RHO_FLOOR
+#define RHO_FLOOR 1e-6
+#endif
+#define SAFE_IRHO(r) (1.0 / (((r) > -RHO_FLOOR && (r) < RHO_FLOOR) ? (((r) < 0.0) ? -RHO_FLOOR : RHO_FLOOR) : (r)))
+
 void Collision_Cumulant::collide(D_int i_level)
 {
 #if (C_Q != 27)
@@ -35,9 +44,15 @@ void Collision_Cumulant::collide(D_int i_level)
             #endif
 
             D_Phy_DDF ddf[27];
+#if (C_MAP_TYPE == 3)
+            // Hot path: 1 trie walk + 27 contiguous double loads instead of 27
+            // independent `f[i_q].at(code)` calls (each a full root-to-leaf walk).
+            f_ptr->f[0].parent()->load_all(lat_code, refine_level, ddf);
+#else
             for (D_int i_q = 0; i_q < 27; ++i_q) {
                 ddf[i_q] = f_ptr->f[i_q].at(lat_code);
             }
+#endif
             // if (i_level==4 && xxx_code==lat_code ) {
             //     for (D_int i_q = 0; i_q < C_Q; ++i_q) {
             //         std::cout << "  f[" << i_q << "] = " << ddf[i_q];
@@ -48,8 +63,13 @@ void Collision_Cumulant::collide(D_int i_level)
             // declare the local array
             D_Phy_DDF k[27] = {0.}, C[27] = {0.};
 
+            // Cache velocity/density for this cell: collision never updates them,
+            // and caching collapses 5 root-to-leaf trie walks into 1 each.
+            const D_uvw& vel = user_[i_level].velocity.at(lat_code);
+            const D_Phy_Rho& rho = user_[i_level].density.at(lat_code);
+
             // initialize the k
-            fwd_central_moment_trans(ddf, user_[i_level].velocity.at(lat_code), k);
+            fwd_central_moment_trans(ddf, vel, k);
             // if (i_level==4 && xxx_code==lat_code ) {
             //     for (D_int i = 0; i < C_Q; ++i) {
             //         printf(" fwd_central_moment_trans u=%f v=%f w=%f k[%d] = %f ddf[%d] = %f\n",user_[i_level].velocity.at(lat_code).x,user_[i_level].velocity.at(lat_code).y,user_[i_level].velocity.at(lat_code).z, i, k[i], i, ddf[i]);
@@ -60,7 +80,7 @@ void Collision_Cumulant::collide(D_int i_level)
             // }
 
             // forward cumulants transformation
-            fwd_cum_trans(k, user_[i_level].density.at(lat_code), C);
+            fwd_cum_trans(k, rho, C);
             // if (i_level==4 && xxx_code==lat_code ) {
             //     for (D_int i = 0; i < C_Q; ++i) {
             //         printf(" fwd_cum_trans k[%d] = %f C[%d] = %f\n", i, k[i], i, C[i]);
@@ -71,7 +91,7 @@ void Collision_Cumulant::collide(D_int i_level)
             // }
 
             // cumulant collide kernel
-            cum_collide_kernel(C, k, tau0, user_[i_level].velocity.at(lat_code), user_[i_level].density.at(lat_code));
+            cum_collide_kernel(C, k, tau0, vel, rho);
             // if (i_level==4 && xxx_code==lat_code ) {
             //     for (D_int i = 0; i < C_Q; ++i) {
             //         printf(" cum_collide_kernel k[%d] = %f C[%d] = %f\n", i, k[i], i, C[i]);
@@ -82,7 +102,7 @@ void Collision_Cumulant::collide(D_int i_level)
             // }
 
             // backward cumulants transformation
-            bwd_cum_trans(C, k, user_[i_level].density.at(lat_code));
+            bwd_cum_trans(C, k, rho);
             // if (i_level==4 && xxx_code==lat_code ) {
             //     for (D_int i = 0; i < C_Q; ++i) {
             //         printf(" bwd_cum_trans k[%d] = %f C[%d] = %f\n", i, k[i], i, C[i]);
@@ -93,7 +113,7 @@ void Collision_Cumulant::collide(D_int i_level)
             // }
 
             // store k to ddf
-            bwd_central_moment_trans(k, ddf, user_[i_level].velocity.at(lat_code));
+            bwd_central_moment_trans(k, ddf, vel);
             // if (i_level==4 && xxx_code==lat_code ) {
             //     for (D_int i = 0; i < C_Q; ++i) {
             //         printf(" bwd_central_moment_trans k[%d] = %f ddf[%d] = %f\n", i, k[i], i, ddf[i]);
@@ -103,9 +123,16 @@ void Collision_Cumulant::collide(D_int i_level)
             //     printf(" bwd_central_moment_trans k[%d] = %f ddf[%d] = %f\n", i, k[i], i, ddf[i]);
             // }
 
+#if (C_MAP_TYPE == 3)
+            // Hot path: 1 trie walk + 27 contiguous double stores instead of 27
+            // independent `fcol[i_q].at(code) = ...` calls (each a full
+            // root-to-leaf walk).
+            f_ptr->fcol[0].parent()->store_all(lat_code, refine_level, ddf);
+#else
             for (D_int i_q = 0; i_q < 27; ++i_q) {
                 f_ptr->fcol[i_q].at(lat_code) = ddf[i_q];
             }
+#endif
         }
     };
     
@@ -116,10 +143,18 @@ void Collision_Cumulant::collide(D_int i_level)
     for (auto lat_iter : Lat_Manager::pointer_me->lat_overlap_C2F.at(i_level))
     {
         D_morton lat_code = lat_iter.first;
+#if (C_MAP_TYPE == 3)
+        // Bulk copy f -> fcol for overlap cells: 2 trie walks (1 load + 1 store)
+        // instead of 54 (27 reads on f + 27 writes on fcol).
+        D_Phy_DDF tmp[27];
+        user_[i_level].df.f[0].parent()->load_all(lat_code, refine_level, tmp);
+        user_[i_level].df.fcol[0].parent()->store_all(lat_code, refine_level, tmp);
+#else
         for (D_int i_q = 0; i_q < 27; ++i_q)
         {
             user_[i_level].df.fcol[i_q].at(lat_code) = user_[i_level].df.f[i_q].at(lat_code);
         }
+#endif
     }
 }
 
@@ -338,7 +373,7 @@ void Collision_Cumulant::fwd_central_moment_trans(const D_Phy_DDF* ddf, const D_
 */
 void Collision_Cumulant::fwd_cum_trans(const D_Phy_DDF *k, const D_Phy_Rho rho, D_Phy_DDF *C) 
 {
-    D_Phy_Rho irho = 1.0 / rho;
+    D_Phy_Rho irho = SAFE_IRHO(rho);
 
     C110 = k110, C011 = k011, C101 = k101;
     C200 = k200, C020 = k020, C002 = k002;
@@ -374,7 +409,7 @@ void Collision_Cumulant::cum_collide_kernel(D_Phy_DDF *C, const D_Phy_DDF *k, co
     D_Phy_DDF _omega1 = 1./tau;
     D_Phy_DDF _omega2 = 1.;
 
-    D_Phy_Rho irho = 1.0 / rho;
+    D_Phy_Rho irho = SAFE_IRHO(rho);
     D_Phy_DDF X1, X2, X3, Y1, Y2, Y3; // tmp
 
     // derivation
@@ -410,7 +445,7 @@ void Collision_Cumulant::cum_collide_kernel(D_Phy_DDF *C, const D_Phy_DDF *k, co
 */
 void Collision_Cumulant::bwd_cum_trans(const D_Phy_DDF *C, D_Phy_DDF *k, D_Phy_Rho rho) 
 {
-    D_Phy_Rho irho = 1.0 / rho;
+    D_Phy_Rho irho = SAFE_IRHO(rho);
     D_Phy_Rho drho = rho - 1.0;
 
     k110 = C110, k011 = C011, k101 = C101;

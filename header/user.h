@@ -3,8 +3,35 @@
 
 #include "Constants.h"
 #include "Grid_Class.h"
+#if (C_MAP_TYPE == 3)
+#include "mortonTrieDDF.hpp"
+#endif
 
 // template<typename T_Phy_DDF>
+#if (C_MAP_TYPE == 3)
+// In C_MAP_TYPE=3 (mortonTrie) mode, f[C_Q] and fcol[C_Q] each share a single
+// underlying MortonTrieDDF (one trie skeleton + bitmap, fat leaves holding
+// `double[BRANCH][C_Q]`). The 27 MortonTrieDDFSlot views expose the same
+// `D_map_define<double>`-compatible interface (at / operator[] / insert /
+// exists / count) so existing call sites like `df.f[i_q].at(code)` keep
+// working without changes.
+struct _s_DDF
+{
+    MortonTrieDDF f_storage;
+    MortonTrieDDF fcol_storage;
+    MortonTrieDDFSlot f[C_Q];
+    MortonTrieDDFSlot fcol[C_Q];
+
+    _s_DDF()
+    {
+        for (int q = 0; q < C_Q; ++q)
+        {
+            f[q].bind(&f_storage, static_cast<uint8_t>(q));
+            fcol[q].bind(&fcol_storage, static_cast<uint8_t>(q));
+        }
+    }
+};
+#else
 struct _s_DDF
 {
     /**
@@ -16,6 +43,16 @@ struct _s_DDF
     // D_map_define<D_Phy_DDF> fcol0, fcol1, fcol2, fcol3, fcol4, fcol5, fcol6, fcol7, fcol8, fcol9, fcol10, fcol11, fcol12, fcol13, fcol14, fcol15, fcol16, fcol17, fcol18;
     D_map_define<D_Phy_DDF> fcol[C_Q];
 };
+#endif
+
+// Type alias for one direction of f[C_Q] / fcol[C_Q]. Use this in code that
+// previously held `D_map_define<D_Phy_DDF>*` pointers into _s_DDF::f, so the
+// type stays correct under all C_MAP_TYPE backends.
+#if (C_MAP_TYPE == 3)
+using D_DDFSlot = MortonTrieDDFSlot;
+#else
+using D_DDFSlot = D_map_define<D_Phy_DDF>;
+#endif
 
 /**
  * @brief Any variable described with {x, y, z}
